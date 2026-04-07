@@ -1,0 +1,103 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+jobs:
+  build:
+    name: Build and Validate
+    runs-on: windows-latest
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup CMake
+        shell: pwsh
+        run: |
+          Write-Host "CMake version:" -ForegroundColor Cyan
+          cmake --version
+
+      - name: Configure CMake (x64)
+        shell: pwsh
+        run: |
+          Write-Host "Configuring CMake build (x64)..." -ForegroundColor Cyan
+          cmake -B build -G "Visual Studio 17 2022" -A x64
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::CMake configuration failed"
+            exit 1
+          }
+
+          Write-Host "CMake configuration succeeded" -ForegroundColor Green
+
+      - name: Build Debug
+        shell: pwsh
+        run: |
+          Write-Host "Building debug configuration..." -ForegroundColor Cyan
+          cmake --build build --config Debug
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Debug build failed"
+            exit 1
+          }
+
+          Write-Host "Debug build succeeded" -ForegroundColor Green
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          Write-Host "Building release configuration..." -ForegroundColor Cyan
+          cmake --build build --config Release
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Release build failed"
+            exit 1
+          }
+
+          Write-Host "Release build succeeded" -ForegroundColor Green
+
+      - name: Verify build outputs
+        shell: pwsh
+        run: |
+          Write-Host "Verifying build outputs..." -ForegroundColor Cyan
+
+          $requiredFiles = @(
+            "bin/Release/RE9HeadTracking.dll",
+            "bin/Debug/RE9HeadTracking.dll"
+          )
+
+          $allExist = $true
+          foreach ($file in $requiredFiles) {
+            if (Test-Path $file) {
+              $size = (Get-Item $file).Length / 1KB
+              Write-Host "  $file ($([math]::Round($size, 2)) KB)" -ForegroundColor Green
+            } else {
+              Write-Host "  Missing: $file" -ForegroundColor Red
+              $allExist = $false
+            }
+          }
+
+          if (-not $allExist) {
+            Write-Host "::error::Some build outputs are missing"
+            exit 1
+          }
+
+          Write-Host "All build outputs verified" -ForegroundColor Green

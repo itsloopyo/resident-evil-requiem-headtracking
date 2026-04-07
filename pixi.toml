@@ -1,0 +1,51 @@
+[workspace]
+name = "re9-head-tracking"
+version = "0.1.0"
+description = "Head tracking mod for Resident Evil Requiem via REFramework"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tasks]
+# Setup CMake build (x64)
+setup = { cmd = """
+    powershell -Command "if (-not (Test-Path 'build')) { cmake -B build -G 'Visual Studio 17 2022' -A x64 } else { Write-Host 'Build directory exists, skipping setup' -ForegroundColor Yellow }"
+""" }
+
+# Build debug configuration
+build = { cmd = "cmake --build build --config Debug", depends-on = ["setup"] }
+
+# Build release configuration
+build-release = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
+
+# Deploy debug build to game directory
+deploy = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Debug", depends-on = ["build"] }
+
+# Deploy release build to game directory
+install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build-release"] }
+
+# Detect game installation path
+detect-game = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/detect-game.ps1" }
+
+# Remove HeadTracking mod (pass --force to also remove REFramework)
+# cmd /c is required — pixi runs through bash which mangles %% in for loops
+uninstall = { cmd = "cmd /c scripts\\uninstall.cmd" }
+uninstall-all = { cmd = "cmd /c scripts\\uninstall.cmd --force" }
+
+# Clean build artifacts
+clean = { cmd = """
+    powershell -Command "if (Test-Path 'build') { Remove-Item 'build' -Recurse -Force }; Write-Host 'Build artifacts cleaned' -ForegroundColor Green"
+""" }
+
+# Full clean including release output
+clean-all = { cmd = """
+    powershell -Command "if (Test-Path 'build') { Remove-Item 'build' -Recurse -Force }; if (Test-Path 'release') { Remove-Item 'release' -Recurse -Force }; Write-Host 'All build artifacts cleaned' -ForegroundColor Green"
+""" }
+
+# Package release ZIP
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release"] }
+
+# Automated release workflow
+release = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1" }
+
+[dependencies]
+# No pixi dependencies - using system CMake and Visual Studio

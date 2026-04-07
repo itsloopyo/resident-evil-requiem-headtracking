@@ -1,0 +1,14 @@
+bin/
+build/
+obj/
+release/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.pixi/
+.claude/
+*.dll
+*.pdb
+*.exe
