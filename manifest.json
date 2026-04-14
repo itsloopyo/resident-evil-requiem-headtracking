@@ -1,7 +1,7 @@
 {
     "name":  "RE9HeadTracking",
     "author":  "itsloopyo",
-    "version":  "0.0.0",
+    "version":  "0.1.0",
     "description":  "Head tracking for Resident Evil Requiem via OpenTrack",
     "game":  "Resident Evil Requiem",
     "repository":  "https://github.com/itsloopyo/resident-evil-requiem-headtracking"
