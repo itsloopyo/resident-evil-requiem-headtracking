@@ -21,9 +21,9 @@ struct Config {
     int diagnosticMarkerKey = DEFAULT_DIAGNOSTIC_MARKER_KEY;
 
     // Position (6DOF)
-    float positionSensitivityX = 2.0f;
-    float positionSensitivityY = 2.0f;
-    float positionSensitivityZ = 2.0f;
+    float positionSensitivityX = 1.0f;
+    float positionSensitivityY = 1.0f;
+    float positionSensitivityZ = 1.0f;
     float positionLimitX = 0.30f;
     float positionLimitY = 0.20f;
     float positionLimitZ = 0.40f;
