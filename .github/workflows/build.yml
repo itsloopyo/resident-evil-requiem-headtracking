@@ -14,6 +14,12 @@ on:
       - 'docs/**'
       - 'LICENSE'
 
+env:
+  # Opt into Node.js 24 for JS-based actions (checkout, upload-artifact,
+  # setup-msbuild). Becomes default June 2026; Node 20 removed Sept 2026.
+  # Remove this once every action we use is Node-24-native by default.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build:
     name: Build and Validate
