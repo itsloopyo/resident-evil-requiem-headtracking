@@ -121,10 +121,41 @@ jobs:
 
           Write-Host "Package created" -ForegroundColor Green
 
+      - name: Stage installer contents for artifact upload
+        shell: pwsh
+        run: |
+          # GitHub's upload-artifact ALWAYS zips its input, so uploading the
+          # packaged installer zip would give users a zip-in-zip. Upload the
+          # EXTRACTED contents instead, which GitHub then zips for download -
+          # yielding a single-unzip experience that also hides the stale
+          # package-release version number that lives in the inner zip's
+          # filename.
+          $zip = Get-ChildItem release/*-installer.zip | Select-Object -First 1
+          if (-not $zip) { Write-Host "::error::No installer zip produced"; exit 1 }
+          $out = "release/artifact-contents"
+          if (Test-Path $out) { Remove-Item -Recurse -Force $out }
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath $out -Force
+          Write-Host "Staged $($zip.Name) -> $out" -ForegroundColor Green
+
+      - name: Compute artifact name from ref
+        id: artifact_name
+        shell: pwsh
+        run: |
+          # Prefer the PR source branch over the synthetic refs/pull/N/merge;
+          # fall back to the push branch name. Sanitize slashes and any other
+          # characters GitHub's artifact name rules reject.
+          $ref = '${{ github.head_ref }}'
+          if (-not $ref) { $ref = '${{ github.ref_name }}' }
+          $safe = $ref -replace '[^A-Za-z0-9._-]', '-'
+          $name = "RE9HeadTracking-$safe"
+          Write-Host "Artifact name: $name"
+          "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RE9HeadTracking-installer
-          path: release/*-installer.zip
+          name: ${{ steps.artifact_name.outputs.name }}
+          path: release/artifact-contents/
           retention-days: 14
           if-no-files-found: error
