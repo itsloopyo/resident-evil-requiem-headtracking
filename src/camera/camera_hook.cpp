@@ -465,6 +465,17 @@ void OnPreBeginRendering() {
     }
 }
 
+void OnLeftGameplay() {
+    // Drop the saved game matrix so the camera-controller pre-hook stops
+    // restoring a stale gameplay-frame matrix into cinematic/loading frames.
+    g_saved.hasGameMatrix = false;
+    // Invalidate crosshair projection so GUI compensation can't run against
+    // last-gameplay-frame tan/roll values during the transition.
+    g_crosshair.valid = false;
+    g_cleanCameraMatrix.valid = false;
+    g_C_valid = false;
+}
+
 void OnPostBeginRendering() {
     if (!g_trackingAppliedThisFrame) return;
     g_trackingAppliedThisFrame = false;

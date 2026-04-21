@@ -9,6 +9,11 @@ void OnPreBeginRendering();
 // so game logic (aim, raycasts, physics) never sees head-tracked state.
 void OnPostBeginRendering();
 
+// Called from game_state_detector when transitioning from gameplay to
+// non-gameplay (cinematic, loading, menu). Clears per-frame caches that
+// could otherwise leak stale state into the transition.
+void OnLeftGameplay();
+
 // Crosshair projection state (read by crosshair overlay and GUI compensation)
 struct CrosshairProjection {
     float tanRight = 0.0f;

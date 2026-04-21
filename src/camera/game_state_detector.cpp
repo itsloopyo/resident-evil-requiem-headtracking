@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "game_state_detector.h"
+#include "camera_hook.h"
 #include "core/logger.h"
 
 #include <cameraunlock/reframework/managed_utils.h>
@@ -443,6 +444,7 @@ void RefreshGameState() {
     } else if (!g_state.inGameplay && g_state.wasInGameplay) {
         g_state.diagBurstRemaining = 5;
         Logger::Instance().Info("Game state: left gameplay");
+        OnLeftGameplay();
     }
     g_state.wasInGameplay = g_state.inGameplay;
 }

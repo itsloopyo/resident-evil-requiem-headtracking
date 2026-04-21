@@ -161,6 +161,18 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
     }
     if (!g_crosshair.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
 
+    // If the head is effectively centered, don't touch the HUD. The LARGE
+    // branch would otherwise overwrite natural child positions with (0,0,0)
+    // every frame (even when no tracker is connected), corrupting the HUD
+    // layout across the gameplay→cinematic transition.
+    constexpr float kMinTan = 1e-4f;
+    constexpr float kMinRoll = 0.05f;
+    if (fabsf(g_crosshair.tanRight) < kMinTan
+        && fabsf(g_crosshair.tanUp) < kMinTan
+        && fabsf(g_crosshair.rollDegrees) < kMinRoll) {
+        return;
+    }
+
     float fovRad = g_crosshair.fovDegrees * DEG_TO_RAD;
     float tanHalfFovY = tanf(fovRad * 0.5f);
     constexpr float kCanvasW = 1920.0f;
@@ -420,6 +432,13 @@ void ResetGuiElementDumper() {
 
 bool OnPreGuiDrawElement(void* element, void* context) {
     if (!element) return true;
+
+    // Outside gameplay (cinematic, loading, menu) do zero per-element work.
+    // Skips the reflection traffic (get_GameObject, get_Name, prefix checks)
+    // that otherwise runs hundreds of times per frame during transitions,
+    // which is when the game's timeline/actor system has been observed to
+    // crash dereferencing freed list pointers.
+    if (!IsInGameplay()) return true;
 
     TryDumpContext(context);
     TryDumpMatrixDiagnostic();
