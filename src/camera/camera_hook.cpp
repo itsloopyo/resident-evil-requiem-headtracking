@@ -10,6 +10,7 @@
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/reframework/re_math.h>
 #include <cameraunlock/math/smoothing_utils.h>
+#include <cameraunlock/rendering/gui_marker_compensation.h>
 #include <reframework/API.hpp>
 
 #include <string>
@@ -407,9 +408,7 @@ void OnPreBeginRendering() {
                         auto fov = g_fn.getCameraFov->invoke(
                             reinterpret_cast<reframework::API::ManagedObject*>(cam.ptr), ref::EmptyArgs());
                         if (!fov.exception_thrown) {
-                            float fovDeg = 0.f;
-                            if (fov.f >= 10.f && fov.f <= 170.f) fovDeg = fov.f;
-                            else { float fromD = static_cast<float>(fov.d); if (fromD >= 10.f && fromD <= 170.f) fovDeg = fromD; }
+                            float fovDeg = cameraunlock::rendering::ReadFovFromInvokeRet(fov.f, fov.d);
                             if (fovDeg > 10.f) rawFov = fovDeg;
                         }
                     }
