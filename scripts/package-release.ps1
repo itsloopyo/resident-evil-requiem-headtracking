@@ -29,6 +29,13 @@ if (-not (Test-Path $dllPath)) {
     throw "RE9HeadTracking.dll not found at: $dllPath"
 }
 
+# Vendor refresh runs as a dependency of `pixi run build`; validate only here.
+$vendorRfDir = Join-Path $projectDir "vendor/reframework"
+$vendorRfZip = Join-Path $vendorRfDir "RE9.zip"
+if (-not (Test-Path $vendorRfZip)) {
+    throw "Bundled REFramework fallback missing: $vendorRfZip. Run 'pixi run refresh-vendors' or 'pixi run build' first."
+}
+
 $iniPath = Join-Path $projectDir "HeadTracking.ini"
 if (-not (Test-Path $iniPath)) {
     throw "HeadTracking.ini not found at: $iniPath"
@@ -63,6 +70,23 @@ Write-Host "  plugins/RE9HeadTracking.dll" -ForegroundColor Green
 
 Copy-Item $iniPath -Destination $pluginsDir -Force
 Write-Host "  plugins/HeadTracking.ini" -ForegroundColor Green
+
+# Bundle vendored REFramework (MIT) as fallback.
+$ghVendorDir = Join-Path $ghStagingDir "vendor/reframework"
+New-Item -ItemType Directory -Path $ghVendorDir -Force | Out-Null
+foreach ($vendorFile in @("RE9.zip", "LICENSE", "README.md", "fetch-latest.ps1")) {
+    $src = Join-Path $vendorRfDir $vendorFile
+    if (Test-Path $src) {
+        Copy-Item $src -Destination $ghVendorDir -Force
+        Write-Host "  vendor/reframework/$vendorFile" -ForegroundColor Green
+    } elseif ($vendorFile -in @("RE9.zip", "fetch-latest.ps1")) {
+        throw "Required vendor file missing: $src"
+    }
+}
+
+# Bundle the shared detection bundle for install.cmd's shim.
+Import-Module (Join-Path $projectDir "cameraunlock-core/powershell/ReleaseWorkflow.psm1") -Force
+Copy-SharedBundle -StagingDir $ghStagingDir -CoreRoot (Join-Path $projectDir 'cameraunlock-core')
 
 $docFiles = @("README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md")
 foreach ($doc in $docFiles) {

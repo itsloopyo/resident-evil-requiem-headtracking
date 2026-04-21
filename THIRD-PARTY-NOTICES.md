@@ -7,7 +7,10 @@ This project uses the following third-party software:
 - **Author:** praydog
 - **License:** MIT
 - **URL:** https://github.com/praydog/REFramework
-- **Usage:** Plugin host and SDK for RE Engine games. Provides method hooking, type system access, and per-GUI-element draw callbacks. Downloaded at install time if not present.
+- **Nightly builds:** https://github.com/praydog/REFramework-nightly
+- **Usage:** Plugin host and SDK for RE Engine games. Provides method hooking, type system access, and per-GUI-element draw callbacks. Bundled in release ZIP as fallback at `vendor/reframework/RE9.zip` (pinned to a specific nightly); fetched latest nightly at install time by `vendor/reframework/fetch-latest.ps1`. `install.cmd` only installs it if the user does not already have a REFramework install. Not modified.
+
+See `vendor/reframework/LICENSE` (MIT) and `vendor/reframework/README.md` (pinned nightly tag + commit + SHA-256) for the bundled snapshot's full provenance.
 
 ## OpenTrack
 
