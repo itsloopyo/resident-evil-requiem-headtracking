@@ -274,37 +274,38 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
 
 // --- Marker compensation ---
 
-static constexpr float kMarkerAssumedDepthMeters = 1.5f;
-
-static bool ProjectCleanMarkerRayToHeadGui(float cleanX, float cleanY, float cleanZ,
-                                           float fx, float fy, float& guiX, float& guiY) {
-    if (!g_C_valid) return false;
-
-    float rr = g_crosshair.rollDegrees * DEG_TO_RAD;
-    float cr = cosf(rr), sr = sinf(rr);
-
-    float C0[3], C1[3];
-    for (int j = 0; j < 3; j++) {
-        C0[j] = cr * g_C[0][j] - sr * g_C[1][j];
-        C1[j] = sr * g_C[0][j] + cr * g_C[1][j];
-    }
-
-    float vx = C0[0] * cleanX + C0[1] * cleanY + C0[2] * cleanZ;
-    float vy = C1[0] * cleanX + C1[1] * cleanY + C1[2] * cleanZ;
-    float vz = g_C[2][0] * cleanX + g_C[2][1] * cleanY + g_C[2][2] * cleanZ;
-    if (vz < 1e-4f) return false;
-
-    guiX = -(vx / vz) * fx;
-    guiY =  (vy / vz) * fy;
-    return true;
-}
-
+// Decomposition: marker_final = R_2d(roll) · (marker_native + head_frame_offset)
+//
+// Equivalently: rotate the native screen-relative position by +roll AND add
+// the head-frame screen offset (which already encodes roll). Both terms must
+// share the same roll factor — applying it to one but not the other produces
+// lateral drift on combined pitch+roll, which is what we hit before.
+//
+// g_marker.tanRight / tanUp is the projection of a point at the assumed
+// marker depth (~5m) ahead of the clean camera through the head-tracked
+// basis. It carries two contributions:
+//   1. Pure rotation — depth-independent, so the angular shift matches what
+//      the crosshair sees (and what yaw/pitch/roll compensation has always
+//      done correctly).
+//   2. Translation parallax — depth-dependent, scaling as 1/depth. The
+//      crosshair projection at 50m gives ~10x too little parallax for
+//      typical world-anchored UI markers, which is why lean/sit produced
+//      visible drift before; the marker projection uses a smaller depth so
+//      the translation contribution lands at roughly the right magnitude.
+//
+// Roll is baked into both contributions because it's part of the head basis
+// (q = Ry · Rx · Rz in ApplyHeadTracking), matching the rendered framebuffer.
+//
+// Note: this differs from Subnautica/Unity siblings (CanvasCompensation.cs),
+// where roll is *not* baked into the camera projection — there the offset is
+// computed with roll=0 and the rotation is applied separately to the marker.
+// Here roll IS in the camera matrix so the offset already carries it.
 static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     if (!guiMo || !g_guiMethods.guiFindObjectsByType || !g_guiMethods.playObjectRuntimeType
         || !g_guiMethods.transformSetPosition || !g_guiMethods.transformGetGlobalPosition) {
         return;
     }
-    if (!g_crosshair.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
+    if (!g_crosshair.valid || !g_marker.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
 
     float fx = 0.f, fy = 0.f;
     if (!GetMarkerProjectionFocalLengths(fx, fy)) return;
@@ -327,7 +328,7 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     static int s_markerDiagFrame = 0;
     bool markerDiag = ((s_markerDiagFrame++ % 120) == 0);
 
-    float markerX = 0.f, markerY = 0.f, markerZ = 0.f;
+    float markerX = 0.f, markerY = 0.f;
     bool hasMarkerAnchor = false;
 
     constexpr uint32_t kMarkerAnchorCandidateIndex = 28;
@@ -338,12 +339,10 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
             if (!gpAnchor.exception_thrown) {
                 float ax = *reinterpret_cast<float*>(&gpAnchor.bytes[0]);
                 float ay = *reinterpret_cast<float*>(&gpAnchor.bytes[4]);
-                float az = *reinterpret_cast<float*>(&gpAnchor.bytes[8]);
-                if (std::isfinite(ax) && std::isfinite(ay) && std::isfinite(az)
+                if (std::isfinite(ax) && std::isfinite(ay)
                     && fabsf(ax) <= 2400.f && fabsf(ay) <= 1600.f) {
                     markerX = ax;
                     markerY = ay;
-                    markerZ = az;
                     hasMarkerAnchor = true;
                 }
             }
@@ -355,28 +354,31 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
         if (!gp.exception_thrown) {
             markerX = *reinterpret_cast<float*>(&gp.bytes[0]);
             markerY = *reinterpret_cast<float*>(&gp.bytes[4]);
-            markerZ = *reinterpret_cast<float*>(&gp.bytes[8]);
-            hasMarkerAnchor = std::isfinite(markerX) && std::isfinite(markerY) && std::isfinite(markerZ);
+            hasMarkerAnchor = std::isfinite(markerX) && std::isfinite(markerY);
         }
     }
 
-    float cleanX = (-markerX / fx) * kMarkerAssumedDepthMeters + g_posCleanX;
-    float cleanY = ( markerY / fy) * kMarkerAssumedDepthMeters + g_posCleanY;
-    float cleanZ = kMarkerAssumedDepthMeters + g_posCleanZ;
-    if (cleanZ < 0.25f) cleanZ = 0.25f;
+    const float rollRad = g_crosshair.rollDegrees * DEG_TO_RAD;
+    const float cr = cosf(rollRad);
+    const float sr = sinf(rollRad);
 
-    float projectedX = 0.f, projectedY = 0.f;
-    bool projected = ProjectCleanMarkerRayToHeadGui(cleanX, cleanY, cleanZ, fx, fy, projectedX, projectedY);
+    // Use the head-frame projection directly — it already carries the roll
+    // factor that matches the rendered framebuffer. Use the marker-depth
+    // projection (g_marker) rather than the crosshair projection so
+    // translation parallax has the right magnitude for world-anchored UI.
+    const float offsetX = -g_marker.tanRight * fx;
+    const float offsetY =  g_marker.tanUp * fy;
 
-    float deltaX = -g_crosshair.tanRight * fx;
-    float deltaY =  g_crosshair.tanUp * fy;
-    if (projected) {
-        deltaX = projectedX - markerX;
-        deltaY = projectedY - markerY;
-    }
+    // Rotate the marker's native screen-relative position around screen center
+    // by the same +roll. Same direction as the crosshair LARGE branch.
+    const float rotatedX = markerX * cr - markerY * sr;
+    const float rotatedY = markerX * sr + markerY * cr;
 
-    // Smooth marker delta to eliminate jitter from C-matrix noise,
-    // position delta noise, FOV fluctuations, and anchor readback variance.
+    float deltaX = (rotatedX - markerX) + offsetX;
+    float deltaY = (rotatedY - markerY) + offsetY;
+
+    // Smooth marker delta to eliminate jitter from FOV fluctuations and
+    // anchor readback variance.
     {
         static float s_markerDeltaX = 0.f;
         static float s_markerDeltaY = 0.f;
@@ -398,13 +400,12 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
 
     if (markerDiag) {
         Logger::Instance().Info(
-            "Marker comp: roll=%.1f anchor=(%.1f,%.1f) proj=(%.1f,%.1f,%d) delta=(%.1f,%.1f) pos=(%.3f,%.3f) C01=%.4f C10=%.4f",
+            "Marker comp: roll=%.1f anchor=(%.1f,%.1f) tanR=%.4f tanU=%.4f offset=(%.1f,%.1f) delta=(%.1f,%.1f)",
             g_crosshair.rollDegrees,
             markerX, markerY,
-            projectedX, projectedY, projected ? 1 : 0,
-            deltaX, deltaY,
-            g_posCleanX, g_posCleanY,
-            g_C[0][1], g_C[1][0]);
+            g_marker.tanRight, g_marker.tanUp,
+            offsetX, offsetY,
+            deltaX, deltaY);
     }
 
     float pos[3] = { deltaX, deltaY, 0.f };

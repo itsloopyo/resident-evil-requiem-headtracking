@@ -1,5 +1,7 @@
 #!/usr/bin/env pwsh
-# Deploy build to RE Requiem game directory
+# Deploy build to RE Requiem game directory.
+# REFramework is sourced from the committed vendor/reframework/RE9.zip; bump
+# it via `pixi run update-deps`. No network access at deploy time.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -19,71 +21,21 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Game directory: $gamePath" -ForegroundColor Gray
 
-# Check for REFramework — auto-install or update to latest nightly
+# Install REFramework from vendored copy if not already present.
 $reframeworkDll = Join-Path $gamePath "dinput8.dll"
-$refVersionFile = Join-Path $gamePath "reframework\.nightly-tag"
-
-# Resolve latest nightly release tag via GitHub API
-Write-Host "  Checking latest REFramework nightly..." -ForegroundColor Gray
-$releaseInfo = $null
-try {
-    $releaseJson = curl.exe -sL "https://api.github.com/repos/praydog/REFramework-nightly/releases/latest"
-    $releaseInfo = $releaseJson | ConvertFrom-Json
-} catch {
-    Write-Host "  Could not check for updates (network error). Skipping." -ForegroundColor Yellow
-}
-
-$needsInstall = -not (Test-Path $reframeworkDll)
-$needsUpdate = $false
-if ($releaseInfo -and (Test-Path $reframeworkDll)) {
-    $latestTag = $releaseInfo.tag_name
-    $installedTag = if (Test-Path $refVersionFile) { (Get-Content $refVersionFile -Raw).Trim() } else { "" }
-    if ($latestTag -ne $installedTag) {
-        Write-Host "  REFramework update available: $installedTag -> $latestTag" -ForegroundColor Yellow
-        $needsUpdate = $true
-    } else {
-        Write-Host "REFramework up to date ($latestTag)." -ForegroundColor Gray
+if (-not (Test-Path $reframeworkDll)) {
+    $vendorZip = Join-Path $projectDir "vendor\reframework\RE9.zip"
+    if (-not (Test-Path $vendorZip)) {
+        throw "REFramework not installed and vendored copy missing at $vendorZip. Run 'pixi run update-deps' to fetch the latest, then retry."
     }
-}
-
-if ($needsInstall -or $needsUpdate) {
-    if ($needsInstall) {
-        Write-Host "REFramework not found. Installing..." -ForegroundColor Yellow
-    }
-
-    if (-not $releaseInfo) {
-        throw "Cannot install REFramework: failed to fetch release info. Install manually from: https://www.nexusmods.com/residentevilrequiem/mods"
-    }
-
-    $refUrl = $releaseInfo.assets | Where-Object { $_.name -eq "RE9.zip" } | Select-Object -ExpandProperty browser_download_url
-    if (-not $refUrl) {
-        throw "Could not find RE9.zip in latest nightly release. Install manually from: https://www.nexusmods.com/residentevilrequiem/mods"
-    }
-
-    $refZip = Join-Path $env:TEMP "REFramework_RE9_install.zip"
-    Write-Host "  Downloading REFramework nightly..." -ForegroundColor Gray
-    curl.exe -fL -o $refZip $refUrl
-    if ($LASTEXITCODE -ne 0) {
-        throw "REFramework download failed. Install manually from: https://www.nexusmods.com/residentevilrequiem/mods"
-    }
-
-    Write-Host "  Extracting to game directory..." -ForegroundColor Gray
-    Expand-Archive -Path $refZip -DestinationPath $gamePath -Force
-    Remove-Item $refZip -ErrorAction SilentlyContinue
-
+    Write-Host "REFramework not found. Extracting bundled copy..." -ForegroundColor Yellow
+    Expand-Archive -Path $vendorZip -DestinationPath $gamePath -Force
     if (-not (Test-Path $reframeworkDll)) {
         throw "REFramework install failed: dinput8.dll not found after extraction."
     }
-
-    # Record installed version
-    $refDir = Join-Path $gamePath "reframework"
-    if (-not (Test-Path $refDir)) { New-Item -ItemType Directory -Path $refDir -Force | Out-Null }
-    $releaseInfo.tag_name | Out-File -FilePath $refVersionFile -Encoding utf8 -NoNewline
-
-    $action = if ($needsInstall) { "installed" } else { "updated" }
-    Write-Host "  REFramework $action ($($releaseInfo.tag_name))!" -ForegroundColor Green
-} elseif (-not $releaseInfo -and (Test-Path $reframeworkDll)) {
-    Write-Host "REFramework found (offline, skipped update check)." -ForegroundColor Gray
+    Write-Host "  REFramework installed from vendor/reframework/RE9.zip." -ForegroundColor Green
+} else {
+    Write-Host "REFramework present, skipping loader install." -ForegroundColor Gray
 }
 
 # Create plugins directory

@@ -23,6 +23,7 @@ constexpr int TX_WORLDMATRIX_OFFSET = 0x80;
 // --- Shared per-frame state (extern-declared in camera_internal.h) ---
 
 CrosshairProjection g_crosshair;
+MarkerProjection g_marker;
 CleanCameraMatrix g_cleanCameraMatrix;
 float g_C[3][3] = {};
 bool g_C_valid = false;
@@ -334,6 +335,7 @@ static bool InitCachedFunctions() {
 // --- Public API ---
 
 const CrosshairProjection& GetCrosshairProjection() { return g_crosshair; }
+const MarkerProjection& GetMarkerProjection() { return g_marker; }
 
 void OnPreBeginRendering() {
     if (!InitCachedFunctions()) return;
@@ -461,6 +463,57 @@ void OnPreBeginRendering() {
                 clean.m[3][0], clean.m[3][1], clean.m[3][2],
                 head.m[2][0], head.m[2][1], head.m[2][2],
                 head.m[3][0], head.m[3][1], head.m[3][2]);
+        }
+    }
+
+    // Marker projection: same construction as the crosshair projection but at
+    // a smaller assumed depth. Rotation parallax is depth-independent (so the
+    // tan terms collapse to the same values as the crosshair when the head
+    // hasn't translated), but translation parallax scales as 1/depth — using
+    // 50m for world-anchored UI markers ~5m away under-compensates by ~10x.
+    {
+        constexpr float kMarkerDepth = 5.0f;
+        const Matrix4x4f& clean = g_cleanCameraMatrix.matrix;
+        const Matrix4x4f& head = *worldMat;
+
+        float markerPtX = clean.m[3][0] + kMarkerDepth * clean.m[2][0];
+        float markerPtY = clean.m[3][1] + kMarkerDepth * clean.m[2][1];
+        float markerPtZ = clean.m[3][2] + kMarkerDepth * clean.m[2][2];
+
+        float dx = markerPtX - head.m[3][0];
+        float dy = markerPtY - head.m[3][1];
+        float dz = markerPtZ - head.m[3][2];
+
+        float vx = dx * head.m[0][0] + dy * head.m[0][1] + dz * head.m[0][2];
+        float vy = dx * head.m[1][0] + dy * head.m[1][1] + dz * head.m[1][2];
+        float vz = dx * head.m[2][0] + dy * head.m[2][1] + dz * head.m[2][2];
+
+        if (vz > 1e-4f) {
+            float rawTanRight = vx / vz;
+            float rawTanUp = vy / vz;
+
+            float dt = Mod::Instance().GetLastDeltaTime();
+            constexpr float kSmoothing = static_cast<float>(cameraunlock::math::kBaselineSmoothing);
+            float t = cameraunlock::math::CalculateSmoothingFactor(kSmoothing, dt);
+
+            static float s_smoothedTanRight = 0.f;
+            static float s_smoothedTanUp = 0.f;
+            static bool s_initialized = false;
+
+            if (!s_initialized) {
+                s_smoothedTanRight = rawTanRight;
+                s_smoothedTanUp = rawTanUp;
+                s_initialized = true;
+            } else {
+                s_smoothedTanRight = cameraunlock::math::Lerp(s_smoothedTanRight, rawTanRight, t);
+                s_smoothedTanUp = cameraunlock::math::Lerp(s_smoothedTanUp, rawTanUp, t);
+            }
+
+            g_marker.tanRight = s_smoothedTanRight;
+            g_marker.tanUp = s_smoothedTanUp;
+            g_marker.valid = true;
+        } else {
+            g_marker.valid = false;
         }
     }
 }

@@ -2,206 +2,207 @@
 :: ============================================
 :: RE9 Head Tracking - Install
 :: ============================================
-:: REFramework plugin for Resident Evil Requiem
+:: Based on cameraunlock-core/scripts/templates/install-reframework.cmd.
+:: Detection delegated to shared/find-game.ps1 (reads games.json).
+:: REFramework variant: loader is dinput8.dll + reframework/, mod files
+:: go to reframework/plugins/. MOD_DLLS here also carries a .ini since
+:: HeadTracking's config is plaintext, not C# attrs - deploy/remove
+:: loops treat entries as opaque filenames.
+:: Only the CONFIG BLOCK below is customised for this mod.
 :: ============================================
 
 :: --- CONFIG BLOCK ---
+set "GAME_ID=resident-evil-requiem"
 set "MOD_DISPLAY_NAME=RE9 Head Tracking"
-set "GAME_EXE=re9.exe"
-set "GAME_DISPLAY_NAME=Resident Evil Requiem"
-set "STEAM_FOLDER_NAME=RESIDENT EVIL requiem BIOHAZARD requiem"
-set "ENV_VAR_NAME=RE9_PATH"
-set "MOD_FILES=RE9HeadTracking.dll HeadTracking.ini"
+set "MOD_DLLS=RE9HeadTracking.dll HeadTracking.ini"
 set "MOD_INTERNAL_NAME=RE9HeadTracking"
 set "MOD_VERSION=0.1.2"
 set "STATE_FILE=.headtracking-state.json"
+set "FRAMEWORK_TYPE=REFramework"
+set "REFRAMEWORK_VENDOR_ZIP_NAME=RE9.zip"
 set "MOD_CONTROLS=Controls:&echo   Home - Recenter head tracking&echo   End  - Toggle head tracking on/off&echo   PgUp - Toggle position tracking&echo   Ins  - Toggle reticle"
-set "REFRAMEWORK_URL=https://github.com/praydog/REFramework-nightly/releases/latest/download/RE9-nightly.zip"
 :: --- END CONFIG BLOCK ---
 
 call :main %*
 set "_EC=%errorlevel%"
-echo.
-pause
+if not defined YES_FLAG ( echo. & pause )
 exit /b %_EC%
 
 :main
 setlocal enabledelayedexpansion
+
+:: -------- Arg parser (canonical, do not modify) --------
+set "YES_FLAG="
+set "_GIVEN_PATH="
+:parse_args
+if "%~1"=="" goto :args_done
+set "_ARG=%~1"
+if /i "!_ARG!"=="/y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "!_ARG!"=="-y"    ( set "YES_FLAG=1" & shift & goto :parse_args )
+if /i "!_ARG!"=="--yes" ( set "YES_FLAG=1" & shift & goto :parse_args )
+if "!_ARG:~0,2!"=="--" ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if "!_ARG:~0,1!"=="/"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if "!_ARG:~0,1!"=="-"  ( echo ERROR: unknown flag "!_ARG!" & exit /b 2 )
+if not defined _GIVEN_PATH (
+    if exist "!_ARG!\" ( set "_GIVEN_PATH=!_ARG!" & shift & goto :parse_args )
+)
+echo ERROR: unrecognised argument "!_ARG!"
+exit /b 2
+:args_done
 
 echo.
 echo === %MOD_DISPLAY_NAME% - Install ===
 echo.
 
 set "SCRIPT_DIR=%~dp0"
-set "GAME_PATH="
 
-:: --- Find game path ---
-
-:: Check command line argument
-if not "%~1"=="" (
-    if exist "%~1\%GAME_EXE%" (
-        set "GAME_PATH=%~1"
-        goto :found_game
-    )
-    echo ERROR: %GAME_EXE% not found at: %~1
-    echo.
+:: -------- Resolve game path via shared shim --------
+set "_SHIM=%SCRIPT_DIR%shared\find-game.ps1"
+if not exist "%_SHIM%" set "_SHIM=%SCRIPT_DIR%..\cameraunlock-core\scripts\find-game.ps1"
+if not exist "%_SHIM%" (
+    echo ERROR: find-game.ps1 not found in shared\ or ..\cameraunlock-core\scripts\.
+    echo If this is a release ZIP, re-download it from GitHub ^(corrupt installer^).
+    echo If this is the dev tree, make sure the cameraunlock-core submodule is checked out.
     exit /b 1
 )
-
-:: Check environment variable
-if defined %ENV_VAR_NAME% (
-    call set "_ENV_PATH=%%%ENV_VAR_NAME%%%"
-    if exist "!_ENV_PATH!\%GAME_EXE%" (
-        set "GAME_PATH=!_ENV_PATH!"
-        goto :found_game
-    )
+set "_SHIM_OUT=%TEMP%\cul-find-%RANDOM%-%RANDOM%.cmd"
+set "_GIVEN_ARG="
+if defined _GIVEN_PATH set "_GIVEN_ARG=-GivenPath "!_GIVEN_PATH!""
+powershell -NoProfile -ExecutionPolicy Bypass -File "%_SHIM%" -GameId %GAME_ID% -OutFile "!_SHIM_OUT!" !_GIVEN_ARG!
+set "_PS_EC=!errorlevel!"
+if not "!_PS_EC!"=="0" (
+    echo.
+    echo ERROR: Could not resolve game install path ^(shim exit code !_PS_EC!^).
+    echo Pass a path explicitly: install.cmd "C:\path\to\game"
+    echo.
+    del "!_SHIM_OUT!" 2>nul
+    exit /b 1
 )
+call "!_SHIM_OUT!"
+del "!_SHIM_OUT!" 2>nul
 
-:: Search Steam
-call :find_steam_game
-if defined GAME_PATH goto :found_game
-
-echo ERROR: Could not find %GAME_DISPLAY_NAME% installation.
-echo.
-echo Please either:
-echo   1. Pass the game path as an argument:
-echo      install.cmd "C:\path\to\%GAME_DISPLAY_NAME%"
-echo.
-echo   2. Set the %ENV_VAR_NAME% environment variable:
-echo      set %ENV_VAR_NAME%=C:\path\to\%GAME_DISPLAY_NAME%
-echo.
-exit /b 1
-
-:found_game
-echo Found %GAME_DISPLAY_NAME% at: %GAME_PATH%
+echo Game found: %GAME_PATH%
 echo.
 
-:: Check if game is running
-tasklist /FI "IMAGENAME eq %GAME_EXE%" 2>NUL | find /I "%GAME_EXE%" >NUL 2>&1
-if %errorlevel%==0 (
-    echo WARNING: %GAME_DISPLAY_NAME% is currently running.
+:: -------- Game-running check --------
+tasklist /fi "imagename eq %GAME_EXE%" 2>nul | findstr /i "%GAME_EXE%" >nul 2>&1
+if not errorlevel 1 (
+    echo ERROR: %GAME_DISPLAY_NAME% is currently running.
     echo Please close the game before installing.
     echo.
     exit /b 1
 )
 
-:: --- Check/Install REFramework ---
-set "REFRAMEWORK_DLL=%GAME_PATH%\dinput8.dll"
-if not exist "%REFRAMEWORK_DLL%" (
-    echo REFramework not found. Downloading...
+:: -------- Prior state --------
+set "WE_INSTALLED=false"
+if exist "%GAME_PATH%\%STATE_FILE%" (
+    findstr /c:"installed_by_us" "%GAME_PATH%\%STATE_FILE%" 2>nul | findstr /c:"true" >nul 2>&1
+    if not errorlevel 1 set "WE_INSTALLED=true"
+)
+
+:: -------- Ensure REFramework --------
+if not exist "%GAME_PATH%\dinput8.dll" (
+    echo REFramework not found. Installing...
     echo.
-
-    set "TEMP_ZIP=%TEMP%\reframework_re9.zip"
-
-    :: Resolve latest nightly URL via GitHub API
-    echo Resolving latest REFramework nightly...
-    for /f "delims=" %%U in ('powershell -Command "(Invoke-RestMethod 'https://api.github.com/repos/praydog/REFramework-nightly/releases/latest').assets | Where-Object { $_.name -eq 'RE9.zip' } | Select-Object -ExpandProperty browser_download_url"') do set "RESOLVED_URL=%%U"
-
-    if not defined RESOLVED_URL (
-        echo ERROR: Could not resolve REFramework download URL.
-        echo Please install REFramework manually from:
-        echo   https://www.nexusmods.com/residentevilrequiem/mods
-        echo.
-        exit /b 1
-    )
-
-    echo Downloading from: !RESOLVED_URL!
-    curl -fL -o "!TEMP_ZIP!" "!RESOLVED_URL!"
-    if errorlevel 1 (
-        echo.
-        echo ERROR: Failed to download REFramework.
-        echo Please install REFramework manually from:
-        echo   https://www.nexusmods.com/residentevilrequiem/mods
-        echo.
-        exit /b 1
-    )
-
-    echo Extracting REFramework...
-    powershell -Command "Expand-Archive -Path '!TEMP_ZIP!' -DestinationPath '%GAME_PATH%' -Force"
-    del "!TEMP_ZIP!" 2>NUL
-
-    if not exist "%REFRAMEWORK_DLL%" (
-        echo ERROR: REFramework installation failed.
-        exit /b 1
-    )
-
+    call :install_reframework
+    if errorlevel 1 exit /b 1
+    set "WE_INSTALLED=true"
     echo REFramework installed successfully.
     echo.
-
-    :: Record that we installed REFramework
-    echo {"installed_by_us": {"reframework": true}} > "%GAME_PATH%\%STATE_FILE%"
 ) else (
-    echo REFramework found.
+    echo Existing REFramework detected, skipping loader install, deploying plugin only.
 )
 
-:: --- Install mod files ---
+:: -------- Deploy mod files --------
 set "PLUGINS_DIR=%GAME_PATH%\reframework\plugins"
-if not exist "%PLUGINS_DIR%" (
-    mkdir "%PLUGINS_DIR%"
-)
+if not exist "%PLUGINS_DIR%" mkdir "%PLUGINS_DIR%"
 
 echo.
-echo Installing mod files...
+echo Deploying mod files...
 
-for %%F in (%MOD_FILES%) do (
-    if exist "%SCRIPT_DIR%plugins\%%F" (
-        copy /Y "%SCRIPT_DIR%plugins\%%F" "%PLUGINS_DIR%\%%F" >NUL
-        echo   Copied: %%F
-    ) else if exist "%SCRIPT_DIR%%%F" (
-        copy /Y "%SCRIPT_DIR%%%F" "%PLUGINS_DIR%\%%F" >NUL
-        echo   Copied: %%F
+set "DEPLOY_FAILED=0"
+for %%f in (%MOD_DLLS%) do (
+    if exist "%SCRIPT_DIR%plugins\%%f" (
+        copy /y "%SCRIPT_DIR%plugins\%%f" "%PLUGINS_DIR%\%%f" >nul
+        echo   Deployed: %%f
+    ) else if exist "%SCRIPT_DIR%%%f" (
+        copy /y "%SCRIPT_DIR%%%f" "%PLUGINS_DIR%\%%f" >nul
+        echo   Deployed: %%f
     ) else (
-        echo   WARNING: %%F not found in installer package
+        echo   ERROR: %%f not found in installer package
+        set "DEPLOY_FAILED=1"
     )
 )
 
-:: Update state file
-if not exist "%GAME_PATH%\%STATE_FILE%" (
-    echo {"installed_by_us": {}} > "%GAME_PATH%\%STATE_FILE%"
+if "!DEPLOY_FAILED!"=="1" (
+    echo.
+    echo ========================================
+    echo   Deployment Failed!
+    echo ========================================
+    echo.
+    exit /b 1
 )
+
+:: -------- Write state file --------
+call :write_state_file
 
 echo.
 echo ============================================
 echo  %MOD_DISPLAY_NAME% v%MOD_VERSION% installed!
 echo ============================================
 echo.
-echo %MOD_CONTROLS%
-echo.
+if defined MOD_CONTROLS (
+    echo !MOD_CONTROLS!
+    echo.
+)
 echo Make sure OpenTrack is running and sending
 echo data to UDP port 4242.
 echo.
+exit /b 0
+
+:: ============================================
+:: Install REFramework from the bundled vendored copy.
+:: Vendor tree is the single source of truth at install time. To bump the
+:: bundled nightly, run `pixi run update-deps` in the mod repo and commit.
+:: See ~/.claude/CLAUDE.md "Vendoring Third-Party Dependencies".
+:: ============================================
+:install_reframework
+set "VENDOR_DIR=%SCRIPT_DIR%vendor\reframework"
+set "VENDOR_ZIP=%VENDOR_DIR%\%REFRAMEWORK_VENDOR_ZIP_NAME%"
+
+if not exist "%VENDOR_ZIP%" (
+    echo   ERROR: Bundled REFramework not found at:
+    echo     %VENDOR_ZIP%
+    echo   The installer ZIP is corrupt. Re-download the release.
+    exit /b 1
+)
+
+echo   Extracting bundled REFramework...
+powershell -NoProfile -Command "Expand-Archive -Path '%VENDOR_ZIP%' -DestinationPath '%GAME_PATH%' -Force"
+
+if not exist "%GAME_PATH%\dinput8.dll" (
+    echo   ERROR: REFramework installation failed.
+    exit /b 1
+)
 
 exit /b 0
 
-:: --- Steam game detection subroutine ---
-:find_steam_game
-set "STEAM_PATH="
-
-:: Try registry
-for /f "tokens=2*" %%A in ('reg query "HKLM\SOFTWARE\WOW6432Node\Valve\Steam" /v InstallPath 2^>NUL') do set "STEAM_PATH=%%B"
-if not defined STEAM_PATH (
-    for /f "tokens=2*" %%A in ('reg query "HKLM\SOFTWARE\Valve\Steam" /v InstallPath 2^>NUL') do set "STEAM_PATH=%%B"
+:: ============================================
+:: Write the canonical state file.
+:: ============================================
+:write_state_file
+> "%GAME_PATH%\%STATE_FILE%" (
+    echo {
+    echo   "schema_version": 1,
+    echo   "framework": {
+    echo     "type": "%FRAMEWORK_TYPE%",
+    echo     "installed_by_us": !WE_INSTALLED!
+    echo   },
+    echo   "mod": {
+    echo     "id": "%GAME_ID%",
+    echo     "name": "%MOD_INTERNAL_NAME%",
+    echo     "version": "%MOD_VERSION%"
+    echo   }
+    echo }
 )
-if not defined STEAM_PATH exit /b 0
-
-:: Check default library
-set "_CHECK=%STEAM_PATH%\steamapps\common\%STEAM_FOLDER_NAME%"
-if exist "!_CHECK!\%GAME_EXE%" (
-    set "GAME_PATH=!_CHECK!"
-    exit /b 0
-)
-
-:: Parse libraryfolders.vdf for additional libraries
-set "VDF=%STEAM_PATH%\steamapps\libraryfolders.vdf"
-if not exist "%VDF%" exit /b 0
-
-for /f "tokens=1,2 delims=	 " %%A in ('findstr /C:"path" "%VDF%"') do (
-    set "_LIB=%%~B"
-    set "_LIB=!_LIB:"=!"
-    if exist "!_LIB!\steamapps\common\%STEAM_FOLDER_NAME%\%GAME_EXE%" (
-        set "GAME_PATH=!_LIB!\steamapps\common\%STEAM_FOLDER_NAME%"
-        exit /b 0
-    )
-)
-
 exit /b 0

@@ -20,4 +20,17 @@ struct CrosshairProjection {
 
 const CrosshairProjection& GetCrosshairProjection();
 
+// Marker projection — same shape as the crosshair projection but computed at
+// a smaller assumed depth so translation parallax has the right magnitude
+// for typical world-anchored UI markers (interaction prompts, objective
+// icons). Rotation is depth-independent so the angular shift matches the
+// crosshair; only the position-offset contribution differs.
+struct MarkerProjection {
+    float tanRight = 0.0f;
+    float tanUp = 0.0f;
+    bool valid = false;
+};
+
+const MarkerProjection& GetMarkerProjection();
+
 } // namespace RE9HT

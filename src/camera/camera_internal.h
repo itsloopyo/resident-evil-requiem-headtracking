@@ -16,6 +16,7 @@ struct CleanCameraMatrix {
 
 // Shared per-frame state (defined in camera_hook.cpp)
 extern CrosshairProjection g_crosshair;
+extern MarkerProjection g_marker;
 extern CleanCameraMatrix g_cleanCameraMatrix;
 extern float g_C[3][3];
 extern bool g_C_valid;
