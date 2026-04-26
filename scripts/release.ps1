@@ -36,13 +36,14 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     Write-Host "Current version: " -NoNewline -ForegroundColor Yellow
     Write-Host $currentVersion -ForegroundColor White
     Write-Host ""
-    Write-Host "Usage: pixi run release <version>" -ForegroundColor Yellow
+    Write-Host "Usage: pixi run release <major|minor|patch|X.Y.Z>" -ForegroundColor Yellow
     exit 0
 }
 
-if ($Version -notmatch '^\d+\.\d+\.\d+$') {
-    Write-Host "Error: Invalid version format '$Version'" -ForegroundColor Red
-    Write-Host "Use semantic versioning: X.Y.Z" -ForegroundColor Yellow
+try {
+    $Version = Resolve-ReleaseVersion -Argument $Version -CurrentVersion $currentVersion
+} catch {
+    Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
