@@ -466,23 +466,27 @@ void OnPreBeginRendering() {
         }
     }
 
-    // Marker projection: same construction as the crosshair projection but at
-    // a smaller assumed depth. Rotation parallax is depth-independent (so the
-    // tan terms collapse to the same values as the crosshair when the head
-    // hasn't translated), but translation parallax scales as 1/depth — using
-    // 50m for world-anchored UI markers ~5m away under-compensates by ~10x.
+    // Marker projection: rotation-only. OnPostBeginRendering restores clean
+    // rotation but keeps the head-tracked position, so at GUI draw time the
+    // game's projection matrix is (clean rotation, head position). Anything
+    // the GUI projects through that matrix gets translation parallax for
+    // free — leaning shifts the world anchor's screen position the same way
+    // it shifts the rendered scene, so the marker tracks the target without
+    // any help from us. Only rotation needs to be compensated manually
+    // (because the rotation was reset to clean).
+    //
+    // To isolate the rotation contribution, project a forward-pointing
+    // vector (no head-position offset) through the head-rotated basis.
+    // Translation drops out cleanly: when the head hasn't rotated, vx/vy
+    // collapse to zero regardless of how far the head has translated.
     {
-        constexpr float kMarkerDepth = 5.0f;
+        constexpr float kRotationDepth = 50.0f;  // arbitrary — depth cancels for rotation-only
         const Matrix4x4f& clean = g_cleanCameraMatrix.matrix;
         const Matrix4x4f& head = *worldMat;
 
-        float markerPtX = clean.m[3][0] + kMarkerDepth * clean.m[2][0];
-        float markerPtY = clean.m[3][1] + kMarkerDepth * clean.m[2][1];
-        float markerPtZ = clean.m[3][2] + kMarkerDepth * clean.m[2][2];
-
-        float dx = markerPtX - head.m[3][0];
-        float dy = markerPtY - head.m[3][1];
-        float dz = markerPtZ - head.m[3][2];
+        float dx = kRotationDepth * clean.m[2][0];
+        float dy = kRotationDepth * clean.m[2][1];
+        float dz = kRotationDepth * clean.m[2][2];
 
         float vx = dx * head.m[0][0] + dy * head.m[0][1] + dz * head.m[0][2];
         float vy = dx * head.m[1][0] + dy * head.m[1][1] + dz * head.m[1][2];

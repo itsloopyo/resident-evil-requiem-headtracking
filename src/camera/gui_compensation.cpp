@@ -274,27 +274,23 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
 
 // --- Marker compensation ---
 
-// Decomposition: marker_final = R_2d(roll) · (marker_native + head_frame_offset)
+// Decomposition: marker_final = R_2d(roll) · (marker_native + rotation_offset)
 //
-// Equivalently: rotate the native screen-relative position by +roll AND add
-// the head-frame screen offset (which already encodes roll). Both terms must
-// share the same roll factor — applying it to one but not the other produces
-// lateral drift on combined pitch+roll, which is what we hit before.
+// Translation parallax is *not* compensated here. OnPostBeginRendering
+// restores clean rotation but keeps the head-tracked position, so at GUI
+// draw time the camera matrix is (clean rotation, head position). Anything
+// the GUI projects through that matrix already accounts for head
+// translation — the world anchor's screen position naturally shifts with
+// the lean, matching where the rendered scene shows the target. Adding a
+// translation contribution here would double-compensate.
 //
-// g_marker.tanRight / tanUp is the projection of a point at the assumed
-// marker depth (~5m) ahead of the clean camera through the head-tracked
-// basis. It carries two contributions:
-//   1. Pure rotation — depth-independent, so the angular shift matches what
-//      the crosshair sees (and what yaw/pitch/roll compensation has always
-//      done correctly).
-//   2. Translation parallax — depth-dependent, scaling as 1/depth. The
-//      crosshair projection at 50m gives ~10x too little parallax for
-//      typical world-anchored UI markers, which is why lean/sit produced
-//      visible drift before; the marker projection uses a smaller depth so
-//      the translation contribution lands at roughly the right magnitude.
-//
-// Roll is baked into both contributions because it's part of the head basis
-// (q = Ry · Rx · Rz in ApplyHeadTracking), matching the rendered framebuffer.
+// What we *do* need to compensate is rotation, because the rotation was
+// reset to clean in OnPostBeginRendering. g_marker.tanRight / tanUp is
+// computed by projecting clean.fwd through the head-rotated basis without
+// any head-position contribution, so it carries pure rotation parallax.
+// Roll is baked into the head basis (q = Ry · Rx · Rz in ApplyHeadTracking)
+// so the offset already encodes it; we then rotate the native marker
+// position by the same roll so both terms share the roll factor.
 //
 // Note: this differs from Subnautica/Unity siblings (CanvasCompensation.cs),
 // where roll is *not* baked into the camera projection — there the offset is
@@ -309,6 +305,13 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
 
     float fx = 0.f, fy = 0.f;
     if (!GetMarkerProjectionFocalLengths(fx, fy)) return;
+    const float fovDeg = g_crosshair.fovDegrees;
+    if (fovDeg < 10.f) return;
+    const float tanHFovY = tanf(fovDeg * DEG_TO_RAD * 0.5f);
+    constexpr float kHalfW_ = 960.f;
+    constexpr float kHalfH_ = 540.f;
+    const float aspect_ = kHalfW_ / kHalfH_;
+    const float tanHFovX = tanHFovY * aspect_;
 
     // Resolve child[1].
     std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
@@ -358,24 +361,69 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
         }
     }
 
-    const float rollRad = g_crosshair.rollDegrees * DEG_TO_RAD;
-    const float cr = cosf(rollRad);
-    const float sr = sinf(rollRad);
+    // Direction-space marker compensation. The "rotate anchor + add forward
+    // offset" approach works when the anchor is at screen center (offset
+    // alone is correct) or under pure roll (rotation alone is correct), but
+    // breaks for off-center anchors under combined yaw/pitch/roll because
+    // the "forward offset" assumes a uniform screen shift that's only valid
+    // for the forward-aim direction. The proper transform: convert anchor
+    // to a direction in clean-camera-local frame, apply the inverse head-
+    // tracking rotation, project back. Subsumes yaw/pitch translation and
+    // roll rotation in one calculation, exact for any anchor position.
+    //
+    // Anchor (markerX, markerY) is in canvas-center-origin, +X right, +Y up.
+    // Convert to NDC, then to direction in clean-camera-local: (a, b, 1).
+    float dirX = (markerX / kHalfW_) * tanHFovX;
+    float dirY = (markerY / kHalfH_) * tanHFovY;
+    float dirZ = 1.0f;
 
-    // Use the head-frame projection directly — it already carries the roll
-    // factor that matches the rendered framebuffer. Use the marker-depth
-    // projection (g_marker) rather than the crosshair projection so
-    // translation parallax has the right magnitude for world-anchored UI.
+    // R_track in ApplyHeadTracking = R_y(yr) * R_x(pr) * R_z(rr) where
+    // yr = -yaw, pr = pitch, rr = roll. So R_track^T = R_z(-rr) * R_x(-pr)
+    // * R_y(-yr) = R_z(-roll) * R_x(-pitch) * R_y(yaw). To apply
+    // R_track^T to a vector, multiply right-to-left: R_y(yaw) first, then
+    // R_x(-pitch), then R_z(-roll).
+    float yawDeg = 0.f, pitchDeg = 0.f, rollDeg = 0.f;
+    Mod::Instance().GetProcessedRotation(yawDeg, pitchDeg, rollDeg);
+    const float yawRad   = -yawDeg   * DEG_TO_RAD;
+    const float pitchRad =  pitchDeg * DEG_TO_RAD;
+    const float rollRad  = -rollDeg  * DEG_TO_RAD;
+
+    // Apply R_y(yaw): x' = x cos + z sin, z' = -x sin + z cos
+    {
+        const float c = cosf(yawRad), s = sinf(yawRad);
+        const float nx = dirX * c + dirZ * s;
+        const float nz = -dirX * s + dirZ * c;
+        dirX = nx; dirZ = nz;
+    }
+    // Apply R_x(-pitch): y' = y cos + z sin, z' = -y sin + z cos
+    {
+        const float c = cosf(pitchRad), s = sinf(pitchRad);
+        const float ny = dirY * c + dirZ * s;
+        const float nz = -dirY * s + dirZ * c;
+        dirY = ny; dirZ = nz;
+    }
+    // Apply R_z(-roll): x' = x cos + y sin, y' = -x sin + y cos
+    {
+        const float c = cosf(rollRad), s = sinf(rollRad);
+        const float nx = dirX * c + dirY * s;
+        const float ny = -dirX * s + dirY * c;
+        dirX = nx; dirY = ny;
+    }
+
+    if (dirZ < 1e-4f) {
+        // Direction folded behind camera; skip compensation this frame.
+        return;
+    }
+
+    const float newCanvasX = (dirX / dirZ / tanHFovX) * kHalfW_;
+    const float newCanvasY = (dirY / dirZ / tanHFovY) * kHalfH_;
+
+    float deltaX = newCanvasX - markerX;
+    float deltaY = newCanvasY - markerY;
+
+    // Unused under direction-space transform; kept defined for diagnostic.
     const float offsetX = -g_marker.tanRight * fx;
     const float offsetY =  g_marker.tanUp * fy;
-
-    // Rotate the marker's native screen-relative position around screen center
-    // by the same +roll. Same direction as the crosshair LARGE branch.
-    const float rotatedX = markerX * cr - markerY * sr;
-    const float rotatedY = markerX * sr + markerY * cr;
-
-    float deltaX = (rotatedX - markerX) + offsetX;
-    float deltaY = (rotatedY - markerY) + offsetY;
 
     // Smooth marker delta to eliminate jitter from FOV fluctuations and
     // anchor readback variance.
