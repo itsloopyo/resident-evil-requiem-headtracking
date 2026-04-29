@@ -67,7 +67,8 @@ bool Mod::Initialize() {
                             sensitivity.yaw, sensitivity.pitch, sensitivity.roll);
 
     // Initialize position processor
-    m_positionEnabled = m_config.positionEnabled;
+    m_trackingMode.store(static_cast<int>(
+        m_config.positionEnabled ? TrackingMode::Full : TrackingMode::RotationOnly));
     m_worldSpaceYaw = m_config.worldSpaceYaw;
 
     cameraunlock::PositionSettings posSettings(
@@ -79,7 +80,7 @@ bool Mod::Initialize() {
     m_positionProcessor.SetSettings(posSettings);
 
     Logger::Instance().Info("Position: %s, sens=%.1f/%.1f/%.1f",
-                            m_positionEnabled ? "6DOF" : "3DOF",
+                            IsPositionEnabled() ? "6DOF" : "3DOF",
                             posSettings.sensitivity_x, posSettings.sensitivity_y, posSettings.sensitivity_z);
 
     // Start UDP receiver
@@ -154,13 +155,22 @@ void Mod::Recenter() {
     Logger::Instance().Info("View recentered");
 }
 
-void Mod::TogglePosition() {
-    m_positionEnabled = !m_positionEnabled;
-    if (!m_positionEnabled) {
-        m_positionProcessor.Reset();
-        m_positionInterpolator.Reset();
+void Mod::CycleTrackingMode() {
+    int next = (m_trackingMode.load() + 1) % 3;
+    m_trackingMode.store(next);
+    switch (static_cast<TrackingMode>(next)) {
+        case TrackingMode::Full:
+            Logger::Instance().Info("Tracking mode: full (rotation + position)");
+            break;
+        case TrackingMode::RotationOnly:
+            m_positionProcessor.Reset();
+            m_positionInterpolator.Reset();
+            Logger::Instance().Info("Tracking mode: rotation only (position disabled)");
+            break;
+        case TrackingMode::PositionOnly:
+            Logger::Instance().Info("Tracking mode: position only (rotation disabled)");
+            break;
     }
-    Logger::Instance().Info("Position tracking %s", m_positionEnabled ? "enabled" : "disabled");
 }
 
 bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
@@ -221,9 +231,13 @@ bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
     cameraunlock::TrackingPose processed = m_processor.Process(
         interpolated.yaw, interpolated.pitch, interpolated.roll, deltaTime);
 
-    yaw = processed.yaw;
-    pitch = processed.pitch;
-    roll = processed.roll;
+    if (IsRotationEnabled()) {
+        yaw = processed.yaw;
+        pitch = processed.pitch;
+        roll = processed.roll;
+    } else {
+        yaw = pitch = roll = 0.0f;
+    }
 
     m_cachedYaw = yaw;
     m_cachedPitch = pitch;
@@ -255,7 +269,7 @@ bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
 }
 
 bool Mod::GetPositionOffset(float& x, float& y, float& z) {
-    if (!m_positionEnabled) {
+    if (!IsPositionEnabled()) {
         x = y = z = 0.0f;
         return false;
     }

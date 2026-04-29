@@ -73,14 +73,6 @@ Write-Host "Current version: $currentVersion" -ForegroundColor Gray
 Write-Host "New version:     $Version" -ForegroundColor Green
 Write-Host ""
 
-$confirm = Read-Host "Continue? (y/N)"
-if ($confirm -ne 'y' -and $confirm -ne 'Y') {
-    Write-Host "Cancelled" -ForegroundColor Yellow
-    exit 0
-}
-
-Write-Host ""
-
 # Update version
 Write-Host "Updating version to $Version..." -ForegroundColor Cyan
 Set-Version $Version
@@ -88,6 +80,19 @@ Set-Version $Version
 # Update MOD_VERSION in install.cmd
 $installCmdPath = Join-Path $scriptDir "install.cmd"
 (Get-Content $installCmdPath -Raw) -replace 'set "MOD_VERSION=.*?"', "set `"MOD_VERSION=$Version`"" | Set-Content $installCmdPath -NoNewline
+
+# Smoke-test build before tagging so a broken build doesn't get a release commit
+Write-Host "Building release configuration..." -ForegroundColor Cyan
+Push-Location $projectDir
+try {
+    pixi run build-release
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: Release build failed (exit $LASTEXITCODE)" -ForegroundColor Red
+        exit 1
+    }
+} finally {
+    Pop-Location
+}
 
 # Generate CHANGELOG
 Write-Host "Generating CHANGELOG..." -ForegroundColor Cyan
@@ -114,7 +119,7 @@ git commit -m "Release v$Version"
 
 # Tag
 Write-Host "Creating tag $tagName..." -ForegroundColor Cyan
-git tag $tagName
+git tag -a $tagName -m "Release $tagName"
 
 # Push
 Write-Host "Pushing to GitHub..." -ForegroundColor Cyan

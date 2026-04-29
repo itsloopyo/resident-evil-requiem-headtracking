@@ -9,6 +9,8 @@ $ProgressPreference = 'SilentlyContinue'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Split-Path -Parent $scriptDir
 
+Import-Module (Join-Path $projectDir "cameraunlock-core\powershell\ReleaseWorkflow.psm1") -Force
+
 # Get version from manifest
 $manifest = Get-Content (Join-Path $projectDir "manifest.json") | ConvertFrom-Json
 $version = $manifest.version
@@ -55,6 +57,8 @@ foreach ($script in @("install.cmd", "uninstall.cmd")) {
     Write-Host "  $script" -ForegroundColor Green
 }
 
+Copy-SharedBundle -StagingDir $ghStagingDir -CoreRoot (Join-Path $projectDir 'cameraunlock-core')
+
 $pluginsDir = Join-Path $ghStagingDir "plugins"
 New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
 
@@ -63,6 +67,25 @@ Write-Host "  plugins/RE9HeadTracking.dll" -ForegroundColor Green
 
 Copy-Item $iniPath -Destination $pluginsDir -Force
 Write-Host "  plugins/HeadTracking.ini" -ForegroundColor Green
+
+# Stage the vendored REFramework so install.cmd can extract it offline.
+# Vendor tree is the install-time source of truth; the build/package
+# pipeline never refreshes it - bump via `pixi run update-deps`.
+$vendorSrcDir = Join-Path $projectDir "vendor\reframework"
+$vendorZip = Join-Path $vendorSrcDir "RE9.zip"
+if (-not (Test-Path $vendorZip)) {
+    throw "Vendored REFramework not found at $vendorZip. Run 'pixi run update-deps' to populate it, then commit the result."
+}
+$vendorDstDir = Join-Path $ghStagingDir "vendor\reframework"
+New-Item -ItemType Directory -Path $vendorDstDir -Force | Out-Null
+foreach ($vendorFile in @("RE9.zip", "LICENSE", "README.md")) {
+    $srcPath = Join-Path $vendorSrcDir $vendorFile
+    if (-not (Test-Path $srcPath)) {
+        throw "Vendored REFramework file missing: $srcPath. Run 'pixi run update-deps' to refresh."
+    }
+    Copy-Item $srcPath -Destination $vendorDstDir -Force
+    Write-Host "  vendor/reframework/$vendorFile" -ForegroundColor Green
+}
 
 $docFiles = @("README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md")
 foreach ($doc in $docFiles) {

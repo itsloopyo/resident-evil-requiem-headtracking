@@ -12,6 +12,11 @@
 
 static cameraunlock::input::HotkeyPoller g_hotkeyPoller;
 
+static bool IsChordHeld() {
+    return ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
+        && ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
+}
+
 static void OnPreBeginRendering() {
     RE9HT::OnPreBeginRendering();
 }
@@ -78,18 +83,43 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
     // Set up hotkeys
     auto& config = RE9HT::Mod::Instance().GetConfig();
 
+    // Nav-cluster bindings. Suppressed when Ctrl+Shift is held so the chord
+    // path (below) is the sole trigger for Ctrl+Shift+<nav> combos.
     g_hotkeyPoller.SetToggleKey(config.toggleKey, []() {
+        if (IsChordHeld()) return;
         RE9HT::Mod::Instance().Toggle();
     });
     g_hotkeyPoller.SetRecenterKey(config.recenterKey, []() {
+        if (IsChordHeld()) return;
         RE9HT::Mod::Instance().Recenter();
     });
     g_hotkeyPoller.AddHotkey(config.positionToggleKey, []() {
-        RE9HT::Mod::Instance().TogglePosition();
+        if (IsChordHeld()) return;
+        RE9HT::Mod::Instance().CycleTrackingMode();
     });
     g_hotkeyPoller.AddHotkey(config.yawModeKey, []() {
+        if (IsChordHeld()) return;
         RE9HT::Mod::Instance().ToggleYawMode();
     });
+
+    // Ctrl+Shift+<letter> chord bindings (CLAUDE.md T/Y/U/G/H/J cluster).
+    g_hotkeyPoller.AddHotkey('T', []() {
+        if (!IsChordHeld()) return;
+        RE9HT::Mod::Instance().Recenter();
+    });
+    g_hotkeyPoller.AddHotkey('Y', []() {
+        if (!IsChordHeld()) return;
+        RE9HT::Mod::Instance().Toggle();
+    });
+    g_hotkeyPoller.AddHotkey('G', []() {
+        if (!IsChordHeld()) return;
+        RE9HT::Mod::Instance().CycleTrackingMode();
+    });
+    g_hotkeyPoller.AddHotkey('H', []() {
+        if (!IsChordHeld()) return;
+        RE9HT::Mod::Instance().ToggleYawMode();
+    });
+
     // F9 (diagnosticMarkerKey slot): toggle hiding of world-anchored GUI markers.
     // The on_pre_gui_draw_element callback checks AreMarkersHidden() and returns
     // false for marker elements when the flag is set. Full marker info is dumped

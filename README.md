@@ -63,12 +63,21 @@ If your phone app sends a sufficiently filtered signal (built-in smoothing, stab
 
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| **Home** | Recenter view |
-| **End** | Toggle head tracking on/off |
-| **Page Up** | Toggle positional tracking on/off |
-| **Page Down** | Toggle world/local yaw mode |
+Two equivalent binding sets - use whichever your keyboard has:
+
+| Action              | Nav-cluster | Chord           |
+|---------------------|-------------|-----------------|
+| Recenter            | `Home`      | `Ctrl+Shift+T`  |
+| Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
+| Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
+| Toggle yaw mode     | `Page Down` | `Ctrl+Shift+H`  |
+
+`Page Up` / `Ctrl+Shift+G` cycles tracking mode:
+
+1. Normal head-tracked gameplay
+2. Positional tracking disabled, rotational tracking enabled
+3. Rotational tracking disabled, positional tracking enabled
+4. Back to normal
 
 ## Configuration
 

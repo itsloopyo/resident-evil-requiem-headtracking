@@ -11,6 +11,12 @@
 
 namespace RE9HT {
 
+enum class TrackingMode {
+    Full = 0,          // both rotation and position
+    RotationOnly = 1,  // position disabled
+    PositionOnly = 2,  // rotation disabled
+};
+
 class Mod {
 public:
     static Mod& Instance();
@@ -23,7 +29,7 @@ public:
     void Toggle();
 
     void Recenter();
-    void TogglePosition();
+    void CycleTrackingMode();
     void ToggleYawMode();
     void PlaceDiagnosticMarker();
     void ToggleMarkersHidden();
@@ -33,7 +39,12 @@ public:
 
     bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
     bool GetPositionOffset(float& x, float& y, float& z);
-    bool IsPositionEnabled() const { return m_positionEnabled; }
+    bool IsPositionEnabled() const {
+        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::RotationOnly;
+    }
+    bool IsRotationEnabled() const {
+        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::PositionOnly;
+    }
     bool IsWorldSpaceYaw() const { return m_worldSpaceYaw; }
     float GetLastDeltaTime() const { return m_lastDeltaTime; }
     bool AreMarkersHidden() const { return m_markersHidden.load(); }
@@ -60,7 +71,7 @@ private:
 
     cameraunlock::PositionProcessor m_positionProcessor;
     cameraunlock::PositionInterpolator m_positionInterpolator;
-    bool m_positionEnabled = true;
+    std::atomic<int> m_trackingMode{static_cast<int>(TrackingMode::Full)};
     bool m_worldSpaceYaw = false;
 
     uint64_t m_lastProcessTime = 0;
