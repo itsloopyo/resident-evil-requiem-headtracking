@@ -2,8 +2,7 @@
 #Requires -Version 5.1
 param(
     [Parameter(Position=0)]
-    [string]$Version = "",
-    [switch]$Force
+    [string]$Version = ""
 )
 
 Set-StrictMode -Version Latest
@@ -49,24 +48,22 @@ try {
 
 $tagName = "v$Version"
 
-if (-not $Force) {
-    $currentBranch = git rev-parse --abbrev-ref HEAD
-    if ($currentBranch -ne "main") {
-        Write-Host "Error: Must be on 'main' branch (currently on '$currentBranch')" -ForegroundColor Red
-        exit 1
-    }
+$currentBranch = git rev-parse --abbrev-ref HEAD
+if ($currentBranch -ne "main") {
+    Write-Host "Error: Must be on 'main' branch (currently on '$currentBranch')" -ForegroundColor Red
+    exit 1
+}
 
-    $status = git status --porcelain
-    if ($status) {
-        Write-Host "Error: Working directory has uncommitted changes" -ForegroundColor Red
-        exit 1
-    }
+$status = git status --porcelain
+if ($status) {
+    Write-Host "Error: Working directory has uncommitted changes" -ForegroundColor Red
+    exit 1
+}
 
-    $existingTag = git tag -l $tagName
-    if ($existingTag) {
-        Write-Host "Error: Tag '$tagName' already exists" -ForegroundColor Red
-        exit 1
-    }
+$existingTag = git tag -l $tagName
+if ($existingTag) {
+    Write-Host "Error: Tag '$tagName' already exists" -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "Current version: $currentVersion" -ForegroundColor Gray
@@ -108,7 +105,6 @@ if (-not $hasExistingTags) {
         Version = $Version
         ArtifactPaths = @("src/", "cameraunlock-core/", "scripts/install.cmd", "scripts/uninstall.cmd")
     }
-    if ($Force) { $changelogArgs.IncludeAll = $true }
     New-ChangelogFromCommits @changelogArgs
 }
 
