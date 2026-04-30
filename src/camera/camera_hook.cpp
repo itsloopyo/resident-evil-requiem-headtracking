@@ -345,6 +345,12 @@ void OnPreBeginRendering() {
         Mod::Instance().Recenter();
     }
 
+    // Advance interpolation + smoothing once per render frame. Every
+    // downstream consumer (ApplyHeadTracking, crosshair projection, GUI
+    // marker compensation) reads cached values, so the rendered camera and
+    // the smoother see the same wall-clock dt.
+    Mod::Instance().TickFrame();
+
     void* transform = nullptr;
     __try { transform = GetCameraTransformCached(); } __except(EXCEPTION_EXECUTE_HANDLER) { return; }
     if (!transform) return;

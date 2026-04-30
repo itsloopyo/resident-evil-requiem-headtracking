@@ -11,8 +11,6 @@ namespace RE9HT {
 
 // Skip noisy initial frames before auto-recentering (~0.5s at 60fps)
 constexpr int STABILIZATION_FRAME_COUNT = 30;
-// Avoid re-processing rotation within the same frame (microseconds)
-constexpr uint64_t ROTATION_CACHE_THRESHOLD_US = 1000;
 
 static uint64_t GetTimeMicros() {
     static double microsPerTick = 0.0;
@@ -143,7 +141,7 @@ void Mod::Recenter() {
     m_udpReceiver.Recenter();
     m_processor.Reset();
     m_poseInterpolator.Reset();
-    m_lastProcessTime = 0;
+    m_lastFrameTickTime = 0;
 
     float px, py, pz;
     if (m_udpReceiver.GetPosition(px, py, pz)) {
@@ -173,23 +171,26 @@ void Mod::CycleTrackingMode() {
     }
 }
 
-bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
+void Mod::TickFrame() {
+    if (!m_initialized.load()) return;
+
     uint64_t now = GetTimeMicros();
-    if (m_lastProcessTime > 0 && (now - m_lastProcessTime) < ROTATION_CACHE_THRESHOLD_US) {
-        yaw = m_cachedYaw;
-        pitch = m_cachedPitch;
-        roll = m_cachedRoll;
-        return m_cachedValid;
+    float deltaTime = 0.016f;
+    if (m_lastFrameTickTime > 0) {
+        deltaTime = (now - m_lastFrameTickTime) / 1000000.0f;
+        if (deltaTime > 0.1f) deltaTime = 0.1f;
+        if (deltaTime < 0.0001f) deltaTime = 0.0001f;
     }
+    m_lastFrameTickTime = now;
+    m_lastDeltaTime = deltaTime;
 
     float rawYaw, rawPitch, rawRoll;
     if (!m_udpReceiver.GetRotation(rawYaw, rawPitch, rawRoll)) {
-        m_lastProcessTime = now;
-        m_cachedValid = false;
-        return false;
+        m_cachedRotationValid = false;
+        m_cachedPositionValid = false;
+        return;
     }
 
-    // Wait for stabilization before auto-recentering (skip noisy initial frames)
     if (!m_hasCentered) {
         m_stabilizationFrames++;
         if (m_stabilizationFrames >= STABILIZATION_FRAME_COUNT) {
@@ -197,17 +198,7 @@ bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
             Recenter();
             Logger::Instance().Info("Auto-recentered after %d frames", m_stabilizationFrames);
         }
-        // Still process data below so smoothing settles
     }
-
-    float deltaTime = 0.016f;
-    if (m_lastProcessTime > 0) {
-        deltaTime = (now - m_lastProcessTime) / 1000000.0f;
-        if (deltaTime > 0.1f) deltaTime = 0.1f;
-        if (deltaTime < 0.0001f) deltaTime = 0.0001f;
-    }
-    m_lastProcessTime = now;
-    m_lastDeltaTime = deltaTime;
 
     int64_t receiveTs = m_udpReceiver.GetLastReceiveTimestamp();
     bool isNewPacket = (receiveTs != m_lastReceiveTimestamp);
@@ -232,19 +223,40 @@ bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
         interpolated.yaw, interpolated.pitch, interpolated.roll, deltaTime);
 
     if (IsRotationEnabled()) {
-        yaw = processed.yaw;
-        pitch = processed.pitch;
-        roll = processed.roll;
+        m_cachedYaw = processed.yaw;
+        m_cachedPitch = processed.pitch;
+        m_cachedRoll = processed.roll;
     } else {
-        yaw = pitch = roll = 0.0f;
+        m_cachedYaw = m_cachedPitch = m_cachedRoll = 0.0f;
+    }
+    m_cachedRotationValid = true;
+
+    if (IsPositionEnabled()) {
+        float rawX, rawY, rawZ;
+        if (m_udpReceiver.GetPosition(rawX, rawY, rawZ)) {
+            cameraunlock::PositionData rawPos(rawX, rawY, rawZ, receiveTs);
+            cameraunlock::PositionData interpolatedPos =
+                m_positionInterpolator.Update(rawPos, deltaTime);
+
+            cameraunlock::math::Quat4 headRotQ = cameraunlock::math::Quat4::FromYawPitchRoll(
+                m_cachedYaw * static_cast<float>(cameraunlock::math::kDegToRad),
+                m_cachedPitch * static_cast<float>(cameraunlock::math::kDegToRad),
+                m_cachedRoll * static_cast<float>(cameraunlock::math::kDegToRad));
+
+            cameraunlock::math::Vec3 offset =
+                m_positionProcessor.Process(interpolatedPos, headRotQ, deltaTime);
+            m_cachedPositionX = offset.x;
+            m_cachedPositionY = offset.y;
+            m_cachedPositionZ = offset.z;
+            m_cachedPositionValid = true;
+        } else {
+            m_cachedPositionValid = false;
+        }
+    } else {
+        m_cachedPositionX = m_cachedPositionY = m_cachedPositionZ = 0.0f;
+        m_cachedPositionValid = false;
     }
 
-    m_cachedYaw = yaw;
-    m_cachedPitch = pitch;
-    m_cachedRoll = roll;
-    m_cachedValid = true;
-
-    // Diagnostic CSV logging
     if (m_diagFile) {
         double timeMs = (now - m_diagStartTime) / 1000.0;
         double deltMs = deltaTime * 1000.0;
@@ -264,40 +276,27 @@ bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
             marker);
         fflush(m_diagFile);
     }
+}
 
+bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
+    if (!m_cachedRotationValid) {
+        yaw = pitch = roll = 0.0f;
+        return false;
+    }
+    yaw = m_cachedYaw;
+    pitch = m_cachedPitch;
+    roll = m_cachedRoll;
     return true;
 }
 
 bool Mod::GetPositionOffset(float& x, float& y, float& z) {
-    if (!IsPositionEnabled()) {
+    if (!m_cachedPositionValid) {
         x = y = z = 0.0f;
         return false;
     }
-
-    float rawX, rawY, rawZ;
-    if (!m_udpReceiver.GetPosition(rawX, rawY, rawZ)) {
-        x = y = z = 0.0f;
-        return false;
-    }
-
-    float deltaTime = m_lastDeltaTime;
-    // Use the UDP receiver's packet timestamp so the interpolator can distinguish
-    // new samples from stale reads. The 3-arg PositionData constructor uses
-    // CurrentTimestamp() which is unique every frame — defeating new-sample detection.
-    int64_t receiveTs = m_udpReceiver.GetLastReceiveTimestamp();
-    cameraunlock::PositionData rawPos(rawX, rawY, rawZ, receiveTs);
-    cameraunlock::PositionData interpolatedPos = m_positionInterpolator.Update(rawPos, deltaTime);
-
-    cameraunlock::math::Quat4 headRotQ = cameraunlock::math::Quat4::FromYawPitchRoll(
-        m_cachedYaw * static_cast<float>(cameraunlock::math::kDegToRad),
-        m_cachedPitch * static_cast<float>(cameraunlock::math::kDegToRad),
-        m_cachedRoll * static_cast<float>(cameraunlock::math::kDegToRad));
-
-    cameraunlock::math::Vec3 offset = m_positionProcessor.Process(interpolatedPos, headRotQ, deltaTime);
-
-    x = offset.x;
-    y = offset.y;
-    z = offset.z;
+    x = m_cachedPositionX;
+    y = m_cachedPositionY;
+    z = m_cachedPositionZ;
     return true;
 }
 

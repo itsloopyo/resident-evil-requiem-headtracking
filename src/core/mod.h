@@ -37,6 +37,15 @@ public:
     Config& GetConfig() { return m_config; }
     const Config& GetConfig() const { return m_config; }
 
+    // Advance interpolation + smoothing pipelines once per render frame.
+    // Caches the smoothed rotation and position so every in-frame consumer
+    // (camera matrix, crosshair projection, GUI marker compensation) reads
+    // an identical value. Without this, per-element GUI calls would each
+    // re-tick the pipeline with a fragmented dt, leaving the rendered
+    // camera advancing on a partial-frame dt while position smoothing sees
+    // an even smaller one.
+    void TickFrame();
+
     bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
     bool GetPositionOffset(float& x, float& y, float& z);
     bool IsPositionEnabled() const {
@@ -74,13 +83,19 @@ private:
     std::atomic<int> m_trackingMode{static_cast<int>(TrackingMode::Full)};
     bool m_worldSpaceYaw = false;
 
-    uint64_t m_lastProcessTime = 0;
+    uint64_t m_lastFrameTickTime = 0;
     float m_lastDeltaTime = 0.016f;
 
     float m_cachedYaw = 0.0f;
     float m_cachedPitch = 0.0f;
     float m_cachedRoll = 0.0f;
-    bool m_cachedValid = false;
+    bool m_cachedRotationValid = false;
+
+    float m_cachedPositionX = 0.0f;
+    float m_cachedPositionY = 0.0f;
+    float m_cachedPositionZ = 0.0f;
+    bool m_cachedPositionValid = false;
+
     bool m_hasCentered = false;
     int m_stabilizationFrames = 0;
 
