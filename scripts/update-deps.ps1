@@ -18,16 +18,17 @@ if (-not (Test-Path $module)) {
 }
 Import-Module $module -Force
 
-# REFramework is per-game: each nightly publishes RE9.zip, RE2.zip, RE4.zip ...
-# A given nightly may skip our game; Refresh-VendoredLoader picks the newest
-# release whose asset list matches AssetPattern, so we naturally tolerate gaps.
+# Praydog repackaged the nightlies on 2026-04-25: per-game zips (RE9.zip,
+# RE2.zip, ...) were collapsed into a single REFramework.zip that ships
+# dinput8.dll + reframework_revision.txt and works across all supported
+# games. VR-specific runtimes moved to a separate VR.zip.
 $out = Join-Path $projectDir 'vendor/reframework'
 Refresh-VendoredLoader `
     -Name 'reframework' `
     -OutputDir $out `
-    -OutputFileName 'RE9.zip' `
+    -OutputFileName 'REFramework.zip' `
     -Owner 'praydog' -Repo 'REFramework-nightly' `
-    -AssetPattern '^RE9\.zip$' `
+    -AssetPattern '^REFramework\.zip$' `
     -AllowPrerelease `
     -LicenseUrl 'https://raw.githubusercontent.com/praydog/REFramework/master/LICENSE' | Out-Null
 

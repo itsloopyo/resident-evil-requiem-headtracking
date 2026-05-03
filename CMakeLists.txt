@@ -33,6 +33,7 @@ add_library(RE9HeadTracking SHARED
     src/core/mod.cpp
     src/core/config.cpp
     src/core/logger.cpp
+    src/core/window.cpp
     src/camera/camera_hook.cpp
     src/camera/gui_compensation.cpp
     src/camera/gui_diagnostics.cpp

@@ -12,7 +12,7 @@ set "MOD_INTERNAL_NAME=RE9HeadTracking"
 set "MOD_VERSION=0.2.0"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=REFramework"
-set "REFRAMEWORK_VENDOR_ZIP_NAME=RE9.zip"
+set "REFRAMEWORK_VENDOR_ZIP_NAME=REFramework.zip"
 set "MOD_CONTROLS=Controls:&echo   Home - Recenter head tracking&echo   End  - Toggle head tracking on/off&echo   PgUp - Toggle position tracking&echo   Ins  - Toggle reticle"
 :: --- END CONFIG BLOCK ---
 

@@ -4,6 +4,7 @@
 
 #include "core/mod.h"
 #include "core/logger.h"
+#include "core/window.h"
 #include "camera/camera_hook.h"
 #include "camera/gui_compensation.h"
 
@@ -18,6 +19,7 @@ static bool IsChordHeld() {
 }
 
 static void OnPreBeginRendering() {
+    RE9HT::CenterGameWindowOnce();
     RE9HT::OnPreBeginRendering();
 }
 
