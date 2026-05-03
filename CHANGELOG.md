@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.1] - 2026-05-03
+
+### Other
+
+- Add DX11 overlay header for crosshair rendering
+- Update PositionInterpolator tests for bounded extrapolation
+- Skip vendor refresh when SHA-256 matches existing copy
+- Fix degenerate-input bugs in scanners, projection, and color parser
+- Add yaw-mode key and WorldSpaceYaw config options
+- Quote /y flag detection and add shared install/uninstall bodies
+- Add DevDeploy module with Cecil dev-install orchestrator
+- Auto-refresh cameraunlock-core submodule in Copy-SharedBundle
+- Add install bodies and dev-deploy orchestrators for non-Cecil frameworks
+- Resolve exe relpath from games.json in ASI/shim dev-deploy
+- Add automatic port retry to C++ UdpReceiver
+- Take BuildOutputPath in dev-deploy and add loader/config auto-install
+- Verify existing BepInEx loader arch and replace on mismatch
+- Fall back to dev-tree vendor path in BepInEx install body
+
 ## [0.2.0] - 2026-05-01
 
 ### Added
