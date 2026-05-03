@@ -24,7 +24,7 @@ Import-Module (Join-Path $projectRoot "cameraunlock-core\powershell\DevDeploy.ps
 Import-Module (Join-Path $projectRoot "cameraunlock-core\powershell\ModDeployment.psm1") -Force
 $buildOutput = Join-Path $projectRoot "bin\$Configuration"
 $configFile = Join-Path $projectRoot 'HeadTracking.ini'
-$vendorRefZip = Join-Path $projectRoot 'vendor\reframework\RE9.zip'
+$vendorRefZip = Join-Path $projectRoot 'vendor\reframework\REFramework.zip'
 $result = Invoke-DevDeployREFramework `
     -GameId 'resident-evil-requiem' `
     -GameDisplayName 'Resident Evil Requiem' `

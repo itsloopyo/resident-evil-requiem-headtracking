@@ -72,13 +72,13 @@ Write-Host "  plugins/HeadTracking.ini" -ForegroundColor Green
 # Vendor tree is the install-time source of truth; the build/package
 # pipeline never refreshes it - bump via `pixi run update-deps`.
 $vendorSrcDir = Join-Path $projectDir "vendor\reframework"
-$vendorZip = Join-Path $vendorSrcDir "RE9.zip"
+$vendorZip = Join-Path $vendorSrcDir "REFramework.zip"
 if (-not (Test-Path $vendorZip)) {
     throw "Vendored REFramework not found at $vendorZip. Run 'pixi run update-deps' to populate it, then commit the result."
 }
 $vendorDstDir = Join-Path $ghStagingDir "vendor\reframework"
 New-Item -ItemType Directory -Path $vendorDstDir -Force | Out-Null
-foreach ($vendorFile in @("RE9.zip", "LICENSE", "README.md")) {
+foreach ($vendorFile in @("REFramework.zip", "LICENSE", "README.md")) {
     $srcPath = Join-Path $vendorSrcDir $vendorFile
     if (-not (Test-Path $srcPath)) {
         throw "Vendored REFramework file missing: $srcPath. Run 'pixi run update-deps' to refresh."
