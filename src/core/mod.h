@@ -2,20 +2,11 @@
 
 #include "config.h"
 #include <cameraunlock/protocol/udp_receiver.h>
-#include <cameraunlock/processing/tracking_processor.h>
-#include <cameraunlock/processing/pose_interpolator.h>
-#include <cameraunlock/processing/position_processor.h>
-#include <cameraunlock/processing/position_interpolator.h>
+#include <cameraunlock/tracking/head_tracking_session.h>
 #include <cstdio>
 #include <string>
 
 namespace RE9HT {
-
-enum class TrackingMode {
-    Full = 0,          // both rotation and position
-    RotationOnly = 1,  // position disabled
-    PositionOnly = 2,  // rotation disabled
-};
 
 class Mod {
 public:
@@ -48,12 +39,8 @@ public:
 
     bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
     bool GetPositionOffset(float& x, float& y, float& z);
-    bool IsPositionEnabled() const {
-        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::RotationOnly;
-    }
-    bool IsRotationEnabled() const {
-        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::PositionOnly;
-    }
+    bool IsPositionEnabled() const { return m_session.IsPositionActive(); }
+    bool IsRotationEnabled() const { return m_session.IsRotationActive(); }
     bool IsWorldSpaceYaw() const { return m_worldSpaceYaw; }
     float GetLastDeltaTime() const { return m_lastDeltaTime; }
     bool AreMarkersHidden() const { return m_markersHidden.load(); }
@@ -74,35 +61,11 @@ private:
 
     Config m_config;
     cameraunlock::UdpReceiver m_udpReceiver;
-    cameraunlock::PoseInterpolator m_poseInterpolator;
-    cameraunlock::TrackingProcessor m_processor;
-    int64_t m_lastReceiveTimestamp = 0;
-
-    cameraunlock::PositionProcessor m_positionProcessor;
-    cameraunlock::PositionInterpolator m_positionInterpolator;
-    std::atomic<int> m_trackingMode{static_cast<int>(TrackingMode::Full)};
+    cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver> m_session{m_udpReceiver};
     bool m_worldSpaceYaw = false;
 
     uint64_t m_lastFrameTickTime = 0;
     float m_lastDeltaTime = 0.016f;
-
-    float m_cachedYaw = 0.0f;
-    float m_cachedPitch = 0.0f;
-    float m_cachedRoll = 0.0f;
-    bool m_cachedRotationValid = false;
-
-    float m_cachedPositionX = 0.0f;
-    float m_cachedPositionY = 0.0f;
-    float m_cachedPositionZ = 0.0f;
-    bool m_cachedPositionValid = false;
-
-    bool m_hasCentered = false;
-    int m_stabilizationFrames = 0;
-
-    // Previous raw values for new-sample detection (data change, not just packet arrival)
-    float m_lastRawYaw = 0.0f;
-    float m_lastRawPitch = 0.0f;
-    float m_lastRawRoll = 0.0f;
 
     // Diagnostic logging
     std::string m_pluginDir;

@@ -4,22 +4,18 @@
 
 #include "core/mod.h"
 #include "core/logger.h"
-#include "core/window.h"
 #include "camera/camera_hook.h"
 #include "camera/gui_compensation.h"
 
+#include <cameraunlock/input/chord_hotkeys.h>
 #include <cameraunlock/input/hotkey_poller.h>
+#include <cameraunlock/reframework/game_window.h>
 #include <cameraunlock/reframework/log_callback.h>
 
 static cameraunlock::input::HotkeyPoller g_hotkeyPoller;
 
-static bool IsChordHeld() {
-    return ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
-        && ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
-}
-
 static void OnPreBeginRendering() {
-    RE9HT::CenterGameWindowOnce();
+    cameraunlock::reframework::CenterGameWindowOnce();
     RE9HT::OnPreBeginRendering();
 }
 
@@ -84,43 +80,37 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
 
     // Set up hotkeys
     auto& config = RE9HT::Mod::Instance().GetConfig();
+    using cameraunlock::input::NavGuarded;
+    using cameraunlock::input::ChordGuarded;
 
     // Nav-cluster bindings. Suppressed when Ctrl+Shift is held so the chord
     // path (below) is the sole trigger for Ctrl+Shift+<nav> combos.
-    g_hotkeyPoller.SetToggleKey(config.toggleKey, []() {
-        if (IsChordHeld()) return;
+    g_hotkeyPoller.SetToggleKey(config.toggleKey, NavGuarded([]() {
         RE9HT::Mod::Instance().Toggle();
-    });
-    g_hotkeyPoller.SetRecenterKey(config.recenterKey, []() {
-        if (IsChordHeld()) return;
+    }));
+    g_hotkeyPoller.SetRecenterKey(config.recenterKey, NavGuarded([]() {
         RE9HT::Mod::Instance().Recenter();
-    });
-    g_hotkeyPoller.AddHotkey(config.positionToggleKey, []() {
-        if (IsChordHeld()) return;
+    }));
+    g_hotkeyPoller.AddHotkey(config.positionToggleKey, NavGuarded([]() {
         RE9HT::Mod::Instance().CycleTrackingMode();
-    });
-    g_hotkeyPoller.AddHotkey(config.yawModeKey, []() {
-        if (IsChordHeld()) return;
+    }));
+    g_hotkeyPoller.AddHotkey(config.yawModeKey, NavGuarded([]() {
         RE9HT::Mod::Instance().ToggleYawMode();
-    });
+    }));
 
     // Ctrl+Shift+<letter> chord bindings (CLAUDE.md T/Y/U/G/H/J cluster).
-    g_hotkeyPoller.AddHotkey('T', []() {
-        if (!IsChordHeld()) return;
+    g_hotkeyPoller.AddHotkey('T', ChordGuarded([]() {
         RE9HT::Mod::Instance().Recenter();
-    });
-    g_hotkeyPoller.AddHotkey('Y', []() {
-        if (!IsChordHeld()) return;
+    }));
+    g_hotkeyPoller.AddHotkey('Y', ChordGuarded([]() {
         RE9HT::Mod::Instance().Toggle();
-    });
-    g_hotkeyPoller.AddHotkey('G', []() {
-        if (!IsChordHeld()) return;
+    }));
+    g_hotkeyPoller.AddHotkey('G', ChordGuarded([]() {
         RE9HT::Mod::Instance().CycleTrackingMode();
-    });
-    g_hotkeyPoller.AddHotkey('H', []() {
-        if (!IsChordHeld()) return;
+    }));
+    g_hotkeyPoller.AddHotkey('H', ChordGuarded([]() {
         RE9HT::Mod::Instance().ToggleYawMode();
-    });
+    }));
 
     // F9 (diagnosticMarkerKey slot): toggle hiding of world-anchored GUI markers.
     // The on_pre_gui_draw_element callback checks AreMarkersHidden() and returns

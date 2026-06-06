@@ -6,6 +6,8 @@
 #include "math_types.h"
 #include "camera_hook.h"
 
+#include <cameraunlock/reframework/camera_chain.h>
+
 namespace RE9HT {
 
 // Clean camera matrix saved before head tracking is applied each frame.
@@ -22,7 +24,7 @@ extern float g_C[3][3];
 extern bool g_C_valid;
 extern float g_posCleanX, g_posCleanY, g_posCleanZ;
 
-// Resolve the primary camera's transform via SceneManager chain.
-void* ResolveCameraTransformInternal();
+// Shared resolver for the primary camera chain (transform, camera, live FOV).
+cameraunlock::reframework::CameraTransformResolver& CameraResolver();
 
 } // namespace RE9HT

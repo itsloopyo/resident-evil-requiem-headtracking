@@ -106,12 +106,8 @@ void TryDumpMatrixDiagnostic() {
     if (s_matDiagDone || !g_cleanCameraMatrix.valid || !Mod::Instance().IsEnabled()) return;
     if (++s_matDiagDelay <= 60) return;
 
-    void* tx = ResolveCameraTransformInternal();
-    if (!tx) return;
-
-    constexpr int TX_WORLDMATRIX_OFFSET = 0x80;
-    Matrix4x4f* live = reinterpret_cast<Matrix4x4f*>(
-        reinterpret_cast<uint8_t*>(tx) + TX_WORLDMATRIX_OFFSET);
+    Matrix4x4f* live = CameraResolver().ResolveWorldMatrix();
+    if (!live) return;
     const Matrix4x4f& clean = g_cleanCameraMatrix.matrix;
     float diffFwd = fabsf(live->m[2][0] - clean.m[2][0])
                   + fabsf(live->m[2][1] - clean.m[2][1])
@@ -138,23 +134,7 @@ void DumpChildTree(reframework::API::ManagedObject* guiMo, int indent) {
     }
 
     // Find the findObjects(Type) method
-    auto guiType = api->tdb()->find_type("via.gui.GUI");
-    if (!guiType) return;
-    reframework::API::Method* findObjectsByType = nullptr;
-    for (auto m : guiType->get_methods()) {
-        if (!m) continue;
-        const char* name = m->get_name();
-        if (!name || strcmp(name, "findObjects") != 0) continue;
-        if (m->get_num_params() != 1) continue;
-        auto params = m->get_params();
-        if (params.size() == 1 && params[0].t) {
-            auto pt = reinterpret_cast<reframework::API::TypeDefinition*>(params[0].t);
-            if (pt && pt->get_name() && strcmp(pt->get_name(), "Type") == 0) {
-                findObjectsByType = m;
-                break;
-            }
-        }
-    }
+    auto findObjectsByType = ref::FindMethodByParamTypeName("via.gui.GUI", "findObjects", "Type");
     if (!findObjectsByType) {
         Logger::Instance().Info("%*s[child walk skipped: findObjects(Type) not found]", indent, "");
         return;

@@ -6,9 +6,10 @@
 #include "core/mod.h"
 #include "core/logger.h"
 
+#include <cameraunlock/math/smoothing_utils.h>
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/reframework/re_math.h>
-#include <cameraunlock/math/smoothing_utils.h>
+#include <cameraunlock/rendering/gui_marker_compensation.h>
 
 #include <reframework/API.hpp>
 #include <unordered_set>
@@ -32,7 +33,6 @@ static struct {
 
 void InitGUICompensationMethods() {
     const auto& api = reframework::API::get();
-    auto tdb = api->tdb();
 
     g_guiMethods.playObjectRuntimeType = api->typeof("via.gui.PlayObject");
 
@@ -42,24 +42,8 @@ void InitGUICompensationMethods() {
     g_guiMethods.transformGetScale    = ref::FindMethodByParamCount("via.gui.TransformObject", "get_Scale", 0);
     g_guiMethods.transformGetGlobalPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "get_GlobalPosition", 0);
 
-    // via.gui.GUI.findObjects — find the 1-arg overload taking a System.Type.
-    auto guiType = tdb->find_type("via.gui.GUI");
-    if (guiType) {
-        for (auto m : guiType->get_methods()) {
-            if (!m) continue;
-            const char* name = m->get_name();
-            if (!name || strcmp(name, "findObjects") != 0) continue;
-            if (m->get_num_params() != 1) continue;
-            auto params = m->get_params();
-            if (params.size() == 1 && params[0].t) {
-                auto pt = reinterpret_cast<reframework::API::TypeDefinition*>(params[0].t);
-                if (pt && pt->get_name() && strcmp(pt->get_name(), "Type") == 0) {
-                    g_guiMethods.guiFindObjectsByType = m;
-                    break;
-                }
-            }
-        }
-    }
+    // via.gui.GUI.findObjects — the 1-arg overload taking a System.Type.
+    g_guiMethods.guiFindObjectsByType = ref::FindMethodByParamTypeName("via.gui.GUI", "findObjects", "Type");
 
     Logger::Instance().Info("GUI compensation methods: playObjType=%p findObjects(Type)=%p setPos=%p getGlobalPos=%p",
         (void*)g_guiMethods.playObjectRuntimeType,
@@ -70,80 +54,18 @@ void InitGUICompensationMethods() {
 
 // --- FOV helpers ---
 
-static float GetLivePrimaryCameraFov() {
-    // Delegate to the camera_hook's cached methods via the shared API
-    // This is a simplified version that reads FOV through the standard chain.
-    static bool s_diagLogged = false;
-    static reframework::API::Method* s_getMainView = nullptr;
-    static reframework::API::Method* s_getPrimaryCamera = nullptr;
-    static reframework::API::Method* s_getCameraFov = nullptr;
-    static bool s_initialized = false;
-
-    if (!s_initialized) {
-        s_initialized = true;
-        const auto& api = reframework::API::get();
-        auto tdb = api->tdb();
-        auto smType = tdb->find_type("via.SceneManager");
-        auto svType = tdb->find_type("via.SceneView");
-        auto camType = tdb->find_type("via.Camera");
-        if (smType) s_getMainView = smType->find_method("get_MainView");
-        if (svType) s_getPrimaryCamera = svType->find_method("get_PrimaryCamera");
-        if (camType) s_getCameraFov = camType->find_method("get_FOV");
-    }
-
-    if (!s_getMainView || !s_getPrimaryCamera || !s_getCameraFov) return 0.f;
-
-    const auto& api = reframework::API::get();
-    void* sm = api->get_native_singleton("via.SceneManager");
-    if (!sm) return 0.f;
-
-    auto mv = s_getMainView->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(sm), ref::EmptyArgs());
-    if (mv.exception_thrown || !mv.ptr) return 0.f;
-
-    auto cam = s_getPrimaryCamera->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(mv.ptr), ref::EmptyArgs());
-    if (cam.exception_thrown || !cam.ptr) return 0.f;
-
-    if (!s_diagLogged) {
-        auto camMo = reinterpret_cast<reframework::API::ManagedObject*>(cam.ptr);
-        auto td = camMo->get_type_definition();
-        const char* tns = (td && td->get_namespace()) ? td->get_namespace() : "";
-        const char* tnm = (td && td->get_name()) ? td->get_name() : "?";
-        Logger::Instance().Info("GetLivePrimaryCameraFov: primary camera type = %s.%s", tns, tnm);
-    }
-
-    auto fov = s_getCameraFov->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(cam.ptr), ref::EmptyArgs());
-    if (fov.exception_thrown) return 0.f;
-
-    float fovDeg = 0.f;
-    if (fov.f >= 10.f && fov.f <= 170.f) fovDeg = fov.f;
-    else { float fromD = static_cast<float>(fov.d); if (fromD >= 10.f && fromD <= 170.f) fovDeg = fromD; }
-
-    if (!s_diagLogged) {
-        Logger::Instance().Info("GetLivePrimaryCameraFov: raw f=%.4f d=%.4f -> chose %.4f", fov.f, fov.d, fovDeg);
-        s_diagLogged = true;
-    }
-
-    return fovDeg;
-}
-
 static bool GetMarkerProjectionFocalLengths(float& fx, float& fy) {
     fx = 0.f;
     fy = 0.f;
     constexpr float kHalfW = 960.f;
     constexpr float kHalfH = 540.f;
-    constexpr float kAspect = kHalfW / kHalfH;
 
-    float fov = GetLivePrimaryCameraFov();
-    if (fov < 10.f || fov > 170.f) return false;
+    float fov = CameraResolver().ResolveFovDegrees();
+    if (!cameraunlock::rendering::FocalLengthsFromVerticalFov(fov, kHalfW, kHalfH, fx, fy)) {
+        return false;
+    }
 
     static bool s_fallbackLogged = false;
-    float tanHFovY = tanf(fov * DEG_TO_RAD * 0.5f);
-    float tanHFovX = tanHFovY * kAspect;
-    fx = kHalfW / tanHFovX;
-    fy = kHalfH / tanHFovY;
     if (!s_fallbackLogged) {
         Logger::Instance().Info("Marker focal lengths: assuming get_FOV %.1f is vertical -> fx=%.1f fy=%.1f",
             fov, fx, fy);
@@ -428,22 +350,12 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     // Smooth marker delta to eliminate jitter from FOV fluctuations and
     // anchor readback variance.
     {
-        static float s_markerDeltaX = 0.f;
-        static float s_markerDeltaY = 0.f;
-        static bool s_markerSmoothedInit = false;
+        static cameraunlock::math::SmoothedFloat s_markerDeltaX;
+        static cameraunlock::math::SmoothedFloat s_markerDeltaY;
         constexpr float kSmoothing = static_cast<float>(cameraunlock::math::kBaselineSmoothing);
         float dt = Mod::Instance().GetLastDeltaTime();
-        float t = cameraunlock::math::CalculateSmoothingFactor(kSmoothing, dt);
-        if (!s_markerSmoothedInit) {
-            s_markerDeltaX = deltaX;
-            s_markerDeltaY = deltaY;
-            s_markerSmoothedInit = true;
-        } else {
-            s_markerDeltaX = cameraunlock::math::Lerp(s_markerDeltaX, deltaX, t);
-            s_markerDeltaY = cameraunlock::math::Lerp(s_markerDeltaY, deltaY, t);
-        }
-        deltaX = s_markerDeltaX;
-        deltaY = s_markerDeltaY;
+        deltaX = s_markerDeltaX.Update(deltaX, kSmoothing, dt);
+        deltaY = s_markerDeltaY.Update(deltaY, kSmoothing, dt);
     }
 
     if (markerDiag) {

@@ -3,8 +3,8 @@
 #include "logger.h"
 
 #include <cameraunlock/config/ini_reader.h>
-
-#include <algorithm>
+#include <cameraunlock/math/finite_utils.h>
+#include <cameraunlock/protocol/port_utils.h>
 
 namespace RE9HT {
 
@@ -13,25 +13,22 @@ void Config::SetDefaults() {
 }
 
 void Config::Validate() {
-    yawMultiplier = std::clamp(yawMultiplier, 0.1f, 5.0f);
-    pitchMultiplier = std::clamp(pitchMultiplier, 0.1f, 5.0f);
-    rollMultiplier = std::clamp(rollMultiplier, 0.0f, 2.0f);
+    using cameraunlock::math::SanitizeFinite;
+    const Config defaults{};
 
-    positionSensitivityX = std::clamp(positionSensitivityX, 0.1f, 10.0f);
-    positionSensitivityY = std::clamp(positionSensitivityY, 0.1f, 10.0f);
-    positionSensitivityZ = std::clamp(positionSensitivityZ, 0.1f, 10.0f);
+    yawMultiplier = SanitizeFinite(yawMultiplier, defaults.yawMultiplier, 0.1f, 5.0f);
+    pitchMultiplier = SanitizeFinite(pitchMultiplier, defaults.pitchMultiplier, 0.1f, 5.0f);
+    rollMultiplier = SanitizeFinite(rollMultiplier, defaults.rollMultiplier, 0.0f, 2.0f);
 
-    positionLimitX = std::clamp(positionLimitX, 0.01f, 2.0f);
-    positionLimitY = std::clamp(positionLimitY, 0.01f, 2.0f);
-    positionLimitZ = std::clamp(positionLimitZ, 0.01f, 2.0f);
-    positionLimitZBack = std::clamp(positionLimitZBack, 0.01f, 2.0f);
-    positionSmoothing = std::clamp(positionSmoothing, 0.0f, 0.99f);
+    positionSensitivityX = SanitizeFinite(positionSensitivityX, defaults.positionSensitivityX, 0.1f, 10.0f);
+    positionSensitivityY = SanitizeFinite(positionSensitivityY, defaults.positionSensitivityY, 0.1f, 10.0f);
+    positionSensitivityZ = SanitizeFinite(positionSensitivityZ, defaults.positionSensitivityZ, 0.1f, 10.0f);
 
-    if (udpPort < 1024) {
-        Logger::Instance().Warning("UDP port %d is in reserved range, using default %d",
-                                   udpPort, DEFAULT_UDP_PORT);
-        udpPort = DEFAULT_UDP_PORT;
-    }
+    positionLimitX = SanitizeFinite(positionLimitX, defaults.positionLimitX, 0.01f, 2.0f);
+    positionLimitY = SanitizeFinite(positionLimitY, defaults.positionLimitY, 0.01f, 2.0f);
+    positionLimitZ = SanitizeFinite(positionLimitZ, defaults.positionLimitZ, 0.01f, 2.0f);
+    positionLimitZBack = SanitizeFinite(positionLimitZBack, defaults.positionLimitZBack, 0.01f, 2.0f);
+    positionSmoothing = SanitizeFinite(positionSmoothing, defaults.positionSmoothing, 0.0f, 0.99f);
 }
 
 bool Config::Load(const char* path) {
@@ -43,7 +40,13 @@ bool Config::Load(const char* path) {
         return false;
     }
 
-    udpPort = static_cast<uint16_t>(reader.ReadInt("Network", "UDPPort", udpPort));
+    int rawPort = reader.ReadInt("Network", "UDPPort", udpPort);
+    bool portValid = false;
+    udpPort = cameraunlock::NormalizeUdpPort(rawPort, DEFAULT_UDP_PORT, portValid);
+    if (!portValid) {
+        Logger::Instance().Warning("UDP port %d is out of range (1024-65535), using default %d",
+                                   rawPort, DEFAULT_UDP_PORT);
+    }
 
     yawMultiplier = reader.ReadFloat("Sensitivity", "YawMultiplier", yawMultiplier);
     pitchMultiplier = reader.ReadFloat("Sensitivity", "PitchMultiplier", pitchMultiplier);
