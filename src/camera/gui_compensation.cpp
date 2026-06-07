@@ -283,69 +283,36 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
         }
     }
 
-    // Direction-space marker compensation. The "rotate anchor + add forward
-    // offset" approach works when the anchor is at screen center (offset
-    // alone is correct) or under pure roll (rotation alone is correct), but
-    // breaks for off-center anchors under combined yaw/pitch/roll because
-    // the "forward offset" assumes a uniform screen shift that's only valid
-    // for the forward-aim direction. The proper transform: convert anchor
-    // to a direction in clean-camera-local frame, apply the inverse head-
-    // tracking rotation, project back. Subsumes yaw/pitch translation and
-    // roll rotation in one calculation, exact for any anchor position.
+    // Marker compensation = yaw/pitch translation + a 2D roll rotation of the
+    // anchor about screen centre, the two sharing one roll factor. This is the
+    // same decomposition the large-HUD-element path applies to the rolled HUD
+    // container (see ApplyCrosshairOffset), and it must use the same roll sign
+    // so markers and HUD agree.
     //
-    // Anchor (markerX, markerY) is in canvas-center-origin, +X right, +Y up.
-    // Convert to NDC, then to direction in clean-camera-local: (a, b, 1).
-    float dirX = (markerX / kHalfW_) * tanHFovX;
-    float dirY = (markerY / kHalfH_) * tanHFovY;
-    float dirZ = 1.0f;
-
-    // R_track in ApplyHeadTracking = R_y(yr) * R_x(pr) * R_z(rr) where
-    // yr = -yaw, pr = pitch, rr = roll. So R_track^T = R_z(-rr) * R_x(-pr)
-    // * R_y(-yr) = R_z(-roll) * R_x(-pitch) * R_y(yaw). To apply
-    // R_track^T to a vector, multiply right-to-left: R_y(yaw) first, then
-    // R_x(-pitch), then R_z(-roll).
-    float yawDeg = 0.f, pitchDeg = 0.f, rollDeg = 0.f;
-    Mod::Instance().GetProcessedRotation(yawDeg, pitchDeg, rollDeg);
-    const float yawRad   = -yawDeg   * DEG_TO_RAD;
-    const float pitchRad =  pitchDeg * DEG_TO_RAD;
-    const float rollRad  = -rollDeg  * DEG_TO_RAD;
-
-    // Apply R_y(yaw): x' = x cos + z sin, z' = -x sin + z cos
-    {
-        const float c = cosf(yawRad), s = sinf(yawRad);
-        const float nx = dirX * c + dirZ * s;
-        const float nz = -dirX * s + dirZ * c;
-        dirX = nx; dirZ = nz;
-    }
-    // Apply R_x(-pitch): y' = y cos + z sin, z' = -y sin + z cos
-    {
-        const float c = cosf(pitchRad), s = sinf(pitchRad);
-        const float ny = dirY * c + dirZ * s;
-        const float nz = -dirY * s + dirZ * c;
-        dirY = ny; dirZ = nz;
-    }
-    // Apply R_z(-roll): x' = x cos + y sin, y' = -x sin + y cos
-    {
-        const float c = cosf(rollRad), s = sinf(rollRad);
-        const float nx = dirX * c + dirY * s;
-        const float ny = -dirX * s + dirY * c;
-        dirX = nx; dirY = ny;
-    }
-
-    if (dirZ < 1e-4f) {
-        // Direction folded behind camera; skip compensation this frame.
-        return;
-    }
-
-    const float newCanvasX = (dirX / dirZ / tanHFovX) * kHalfW_;
-    const float newCanvasY = (dirY / dirZ / tanHFovY) * kHalfH_;
-
-    float deltaX = newCanvasX - markerX;
-    float deltaY = newCanvasY - markerY;
-
-    // Unused under direction-space transform; kept defined for diagnostic.
+    // Why not a single direction-space reprojection through the measured
+    // clean-to-head rotation: for pure roll that reprojection collapses
+    // (the FOV/aspect terms cancel) to a flat screen rotation by -roll, i.e.
+    // the OPPOSITE sense to the rolled HUD. On an off-centre anchor — which is
+    // exactly what moving the aim with the mouse produces — that counter-roll
+    // reads as perpendicular drift: a vertical anchor offset wanders
+    // horizontally, a horizontal offset wanders vertically. A flat screen
+    // rotation matches how the engine rolls the 2D HUD, with no such drift.
+    //
+    // tanRight/tanUp from the forward projection carry the yaw/pitch screen
+    // shift (they collapse to ~0 under pure roll, since the roll axis is the
+    // view forward), so the roll rotation owns roll and the offset owns
+    // yaw/pitch.
     const float offsetX = -g_marker.tanRight * fx;
     const float offsetY =  g_marker.tanUp * fy;
+
+    const float rollR = g_crosshair.rollDegrees * DEG_TO_RAD;
+    const float cosR = cosf(rollR);
+    const float sinR = sinf(rollR);
+    const float rotX = markerX * cosR - markerY * sinR;
+    const float rotY = markerX * sinR + markerY * cosR;
+
+    float deltaX = (rotX - markerX) + offsetX;
+    float deltaY = (rotY - markerY) + offsetY;
 
     // Smooth marker delta to eliminate jitter from FOV fluctuations and
     // anchor readback variance.
