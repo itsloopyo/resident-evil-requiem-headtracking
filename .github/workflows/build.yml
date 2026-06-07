@@ -22,101 +22,47 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          submodules: true
+          submodules: recursive
 
+      # C++ toolchain for the pixi `package` task's cmake/msbuild build.
       - name: Setup Visual Studio environment
         uses: microsoft/setup-msbuild@v3
 
-      - name: Setup CMake
+      - name: Setup pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+
+      # Build + package through the SAME command a developer runs locally. All
+      # build logic lives in the pixi task chain (cmake configure -> build ->
+      # package); the workflow owns none, so local and CI can't drift.
+      - name: Build and package
+        shell: pwsh
+        run: pixi run package
+
+      # Unzip the installer so upload-artifact doesn't nest a zip in its zip.
+      - name: Stage installer contents for artifact upload
         shell: pwsh
         run: |
-          Write-Host "CMake version:" -ForegroundColor Cyan
-          cmake --version
-
-      - name: Configure CMake (x64)
-        shell: pwsh
-        run: |
-          Write-Host "Configuring CMake build (x64)..." -ForegroundColor Cyan
-          cmake -B build -G "Visual Studio 17 2022" -A x64
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::CMake configuration failed"
+          $zip = Get-ChildItem release/*-installer.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $zip) {
+            Write-Host "::error::No installer ZIP was produced by 'pixi run package'"
             exit 1
           }
+          $dest = "release/artifact-contents"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath $dest -Force
+          Write-Host "Staged $($zip.Name)" -ForegroundColor Green
 
-          Write-Host "CMake configuration succeeded" -ForegroundColor Green
-
-      - name: Build Debug
+      - name: Compute artifact name from ref
+        id: artifact
         shell: pwsh
         run: |
-          Write-Host "Building debug configuration..." -ForegroundColor Cyan
-          cmake --build build --config Debug
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Debug build failed"
-            exit 1
-          }
-
-          Write-Host "Debug build succeeded" -ForegroundColor Green
-
-      - name: Build Release
-        shell: pwsh
-        run: |
-          Write-Host "Building release configuration..." -ForegroundColor Cyan
-          cmake --build build --config Release
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Release build failed"
-            exit 1
-          }
-
-          Write-Host "Release build succeeded" -ForegroundColor Green
-
-      - name: Verify build outputs
-        shell: pwsh
-        run: |
-          Write-Host "Verifying build outputs..." -ForegroundColor Cyan
-
-          $requiredFiles = @(
-            "bin/Release/RE9HeadTracking.dll",
-            "bin/Debug/RE9HeadTracking.dll"
-          )
-
-          $allExist = $true
-          foreach ($file in $requiredFiles) {
-            if (Test-Path $file) {
-              $size = (Get-Item $file).Length / 1KB
-              Write-Host "  $file ($([math]::Round($size, 2)) KB)" -ForegroundColor Green
-            } else {
-              Write-Host "  Missing: $file" -ForegroundColor Red
-              $allExist = $false
-            }
-          }
-
-          if (-not $allExist) {
-            Write-Host "::error::Some build outputs are missing"
-            exit 1
-          }
-
-          Write-Host "All build outputs verified" -ForegroundColor Green
-
-      - name: Package installer
-        shell: pwsh
-        run: |
-          Write-Host "Packaging installer ZIP..." -ForegroundColor Cyan
-          powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::Packaging failed"
-            exit 1
-          }
-
-          Write-Host "Package created" -ForegroundColor Green
+          $branch = "${{ github.ref_name }}" -replace '[^A-Za-z0-9._-]', '-'
+          echo "name=RE9HeadTracking-$branch" >> $env:GITHUB_OUTPUT
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
-          name: RE9HeadTracking-installer
-          path: release/*-installer.zip
+          name: ${{ steps.artifact.outputs.name }}
+          path: release/artifact-contents/
           retention-days: 14
           if-no-files-found: error

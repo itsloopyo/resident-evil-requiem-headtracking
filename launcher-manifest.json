@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "mod_info": {
+    "name": "RE9HeadTracking",
+    "version": "0.2.1",
+    "game_id": "resident-evil-requiem"
+  },
+  "strategy": "REFramework",
+  "delivery_mode": "manifest",
+
+  "loader": {
+    "archives": [
+      { "source": "vendor/reframework/REFramework.zip", "dest": "", "flatten": null }
+    ],
+    "detect": [ "dinput8.dll" ],
+    "seed": [
+      { "target": "reframework/plugins/HeadTracking.ini", "content_b64": "OyBSRTkgSGVhZCBUcmFja2luZyBDb25maWd1cmF0aW9uCjsgRGVsZXRlIHRoaXMgZmlsZSB0byByZXNldCB0byBkZWZhdWx0cwoKW05ldHdvcmtdCjsgVURQIHBvcnQgZm9yIE9wZW5UcmFjayBkYXRhIChkZWZhdWx0OiA0MjQyKQpVRFBQb3J0PTQyNDIKCltTZW5zaXRpdml0eV0KOyBSb3RhdGlvbiBzZW5zaXRpdml0eSBtdWx0aXBsaWVycyAoMS4wID0gMToxKQpZYXdNdWx0aXBsaWVyPTEuMApQaXRjaE11bHRpcGxpZXI9MS4wClJvbGxNdWx0aXBsaWVyPTEuMAoKW1Bvc2l0aW9uXQo7IFBvc2l0aW9uIHRyYWNraW5nIHNlbnNpdGl2aXR5ICgwLjEtMTAuMCwgaGlnaGVyID0gbW9yZSBtb3ZlbWVudCkKU2Vuc2l0aXZpdHlYPTIuMApTZW5zaXRpdml0eVk9Mi4wClNlbnNpdGl2aXR5Wj0yLjAKOyBQb3NpdGlvbiBsaW1pdHMgaW4gbWV0ZXJzIChob3cgZmFyIHRoZSBjYW1lcmEgY2FuIG1vdmUpCkxpbWl0WD0wLjMwCkxpbWl0WT0wLjIwCkxpbWl0Wj0wLjQwCjsgQmFja3dhcmQgbGVhbiBsaW1pdCAocHJldmVudHMgY2FtZXJhIGNsaXBwaW5nIHRocm91Z2ggcGxheWVyIG1vZGVsKQpMaW1pdFpCYWNrPTAuMTAKOyBTbW9vdGhpbmcgZmFjdG9yICgwLjAgPSBub25lLCAwLjk5ID0gbWF4aW11bSkKU21vb3RoaW5nPTAuMTUKOyBJbnZlcnQgcG9zaXRpb24gYXhlcwpJbnZlcnRYPWZhbHNlCkludmVydFk9ZmFsc2UKSW52ZXJ0Wj1mYWxzZQo7IEVuYWJsZS9kaXNhYmxlIHBvc2l0aW9uIHRyYWNraW5nICg2RE9GKQpFbmFibGVkPXRydWUKCltIb3RrZXlzXQo7IFZpcnR1YWwga2V5IGNvZGVzIChoZXgpClRvZ2dsZUtleT0weDIzICAgIDsgRW5kIC0gRW5hYmxlL2Rpc2FibGUKUmVjZW50ZXJLZXk9MHgyNCAgOyBIb21lIC0gUmVjZW50ZXIgdmlldwpQb3NpdGlvblRvZ2dsZUtleT0weDIxIDsgUGFnZSBVcCAtIFRvZ2dsZSBwb3NpdGlvbgpSZXRpY2xlVG9nZ2xlS2V5PTB4MkQgIDsgSW5zZXJ0IC0gVG9nZ2xlIHJldGljbGUKCltSZXRpY2xlXQo7IFNob3cgdGhlIGhlYWQgdHJhY2tpbmcgcmV0aWNsZSBvdmVybGF5CkVuYWJsZWQ9dHJ1ZQoKW0dlbmVyYWxdCjsgQXV0by1lbmFibGUgdHJhY2tpbmcgb24gZ2FtZSBzdGFydApBdXRvRW5hYmxlPXRydWUK" }
+    ]
+  },
+
+  "files": [
+    { "source": "plugins/RE9HeadTracking.dll", "target": "reframework/plugins/RE9HeadTracking.dll" }
+  ],
+
+  "runtime_requirements": [],
+  "dependencies": []
+}

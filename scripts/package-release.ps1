@@ -87,6 +87,23 @@ foreach ($vendorFile in @("REFramework.zip", "LICENSE", "README.md")) {
     Write-Host "  vendor/reframework/$vendorFile" -ForegroundColor Green
 }
 
+# Stamp launcher-manifest.json with the real release version and copy it to
+# the installer-ZIP root. This is the only file the launcher reads to ingest
+# the package; manifest.json stays the repo-internal version source.
+$manifestSource = Join-Path $projectDir "launcher-manifest.json"
+if (-not (Test-Path $manifestSource)) {
+    throw "launcher-manifest.json not found at repo root ($manifestSource)"
+}
+$manifestJson = Get-Content $manifestSource -Raw | ConvertFrom-Json
+$manifestJson.mod_info.version = $version
+$manifestDest = Join-Path $ghStagingDir "launcher-manifest.json"
+[System.IO.File]::WriteAllText(
+    $manifestDest,
+    ($manifestJson | ConvertTo-Json -Depth 10),
+    (New-Object System.Text.UTF8Encoding($false))
+)
+Write-Host "  launcher-manifest.json (v$version)" -ForegroundColor Green
+
 $docFiles = @("README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md")
 foreach ($doc in $docFiles) {
     $docPath = Join-Path $projectDir $doc
