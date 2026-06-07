@@ -9,6 +9,10 @@ release/
 *.suo
 .pixi/
 .claude/
+.lab/
+.mcp.json
+CLAUDE.md
+AGENTS.md
 *.dll
 *.pdb
 *.exe
