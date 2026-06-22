@@ -38,5 +38,12 @@ $result = Invoke-DevDeployREFramework `
 Write-DeploymentSuccess `
     -ModName "Head Tracking mod" `
     -DeployPath $result.DeployedDllPath `
-    -RecenterKey "Home" `
-    -ToggleKey "End"
+    -Controls @(
+        "Home      - Recenter head tracking",
+        "End       - Toggle head tracking on/off",
+        "Page Up   - Cycle tracking mode (full / rotation-only / position-only)",
+        "Page Down - Toggle yaw mode (world / local)",
+        "F9        - Toggle world-anchored GUI marker hiding (diagnostic)",
+        "",
+        "No nav cluster? Chords: Ctrl+Shift+ T=Recenter Y=Toggle G=Mode H=Yaw"
+    )
