@@ -23,7 +23,7 @@ Import-Module $module -Force
 # dinput8.dll + reframework_revision.txt and works across all supported
 # games. VR-specific runtimes moved to a separate VR.zip.
 $out = Join-Path $projectDir 'vendor/reframework'
-Refresh-VendoredLoader `
+Update-VendoredLoader `
     -Name 'reframework' `
     -OutputDir $out `
     -OutputFileName 'REFramework.zip' `
