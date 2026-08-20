@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0] - 2026-08-20
+
+### Added
+
+- tracker owns centring, smoothing splits into LocalSmoothing and RemoteSmoothing
+
+### Fixed
+
+- use flat 2D roll rotation for marker compensation to stop off-center drift
+- show full control set in pixi install via shared -Controls
+
 ## [Unreleased]
 
 ### Logging
