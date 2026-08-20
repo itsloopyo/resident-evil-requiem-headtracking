@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Logging
+
+- Removed `HeadTracking_diag.csv`. It was written every frame with a flush per row, about 20 MB an hour of disk traffic on the render thread, always on and documented nowhere. `F9` hides and shows the world-anchored GUI markers; it never placed a marker in the log, and the unreachable code that claimed to has been removed.
+- Capped the four per-frame crosshair/marker projection traces at five lines each per session. They ran every 120 frames for the whole session, about 1.3 MB an hour at 60 fps into REFramework's log, which buried the startup lines a user is asked to send.
+- The log now names the config file it actually read (`Config loaded from <path>`), so an edit made to the wrong `HeadTracking.ini` is visible in the log instead of costing a support round trip.
+- A one-shot `First tracker pose received: yaw/pitch/roll (local|remote connection)` line the first time a tracker packet reaches the mod. It is emitted ahead of every enable/gameplay gate, so its absence means the packets never arrived rather than that tracking was off or the camera hook had not engaged.
+- Troubleshooting now names the log file to send (`<game>/re2_framework_log.txt`, truncated per launch) and the startup lines to look for in it.
+
+### Changed
+- Recentring is gone entirely: the `Home` / `Ctrl+Shift+T` hotkey, the
+  `RecenterKey` ini entry, and the mod's own centre. Your tracker owns the
+  centre now. Set it there, with OpenTrack's Center bind, the CENTER button in
+  a phone app, or your headset's own centring, and the mod applies what the
+  tracker sends.
+  Two centres in series was the problem: when the view was off you could not
+  tell which side was wrong, and switching trackers meant centring in both.
+- Smoothing is now two user-configurable parameters in a new `[Smoothing]` section of `HeadTracking.ini`: `LocalSmoothing` (default 0.0) for a tracker running on this machine, and `RemoteSmoothing` (default 0.15) for a tracker on a remote network device. The value is picked per connection from the packet source address and is re-evaluated while the game runs, so switching between a local OpenTrack instance and a phone on WiFi takes effect without a restart.
+- Removed the `[Position] Smoothing` key. Both new parameters cover rotation and position, so there is no separate position smoothing setting.
+- Removed the hidden 0.15 baseline smoothing floor that silently overrode the configured value. Local users now get zero-latency tracking by default.
+
 ## [0.2.2] - 2026-06-07
 
 ### Added

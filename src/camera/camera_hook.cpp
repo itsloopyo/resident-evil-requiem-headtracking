@@ -31,7 +31,7 @@ float g_posCleanZ = 0.f;
 // Per-frame flag: set true when OnPreBeginRendering applies head tracking.
 static bool g_trackingAppliedThisFrame = false;
 
-// Saved game rotation — what the game INTENDED before we modified it
+// Saved game rotation - what the game INTENDED before we modified it
 static struct {
     Matrix4x4f gameMatrix;
     bool hasGameMatrix = false;
@@ -179,12 +179,14 @@ const CrosshairProjection& GetCrosshairProjection() { return g_crosshair; }
 const MarkerProjection& GetMarkerProjection() { return g_marker; }
 
 void OnPreBeginRendering() {
+    // Before every gate below: the first-packet latch has to survive
+    // AutoEnable=false, a menu, and a failed function cache, because those are
+    // exactly the states a "no head tracking" report is trying to tell apart.
+    Mod::Instance().LogFirstTrackerPose();
+
     if (!InitCachedFunctions()) return;
     if (!Mod::Instance().IsEnabled()) return;
     if (!IsInGameplay()) return;
-    if (ShouldRecenter()) {
-        Mod::Instance().Recenter();
-    }
 
     // Advance interpolation + smoothing once per render frame. Every
     // downstream consumer (ApplyHeadTracking, crosshair projection, GUI
@@ -221,12 +223,13 @@ void OnPreBeginRendering() {
     }
 
     float dt = Mod::Instance().GetLastDeltaTime();
-    constexpr float kProjectionSmoothing = static_cast<float>(cameraunlock::math::kBaselineSmoothing);
+    // Internal projection-smoothing constant, deliberately independent of the user's tracking smoothing.
+    constexpr float kProjectionSmoothing = 0.15f;
 
     // Crosshair projection: where the aim point appears on the head-tracked screen.
     // Screen-space values are smoothed to eliminate jitter from perspective
-    // division noise and per-frame FOV fluctuations, using the same baseline
-    // smoothing factor as the rotation pipeline.
+    // division noise and per-frame FOV fluctuations, using the internal
+    // projection-smoothing constant above.
     {
         const Matrix4x4f& clean = g_cleanCameraMatrix.matrix;
         const Matrix4x4f& head = *worldMat;
@@ -254,8 +257,12 @@ void OnPreBeginRendering() {
             g_crosshair.valid = false;
         }
 
+        // Capped: the 120-frame interval alone streams for the whole
+        // session, which buries the startup chain a user is asked to send.
         static int s_projFrame = 0;
-        if ((s_projFrame++ % 120) == 0) {
+        static int s_projFrameLeft = 5;
+        if (s_projFrameLeft > 0 && (s_projFrame++ % 120) == 0) {
+            s_projFrameLeft--;
             Logger::Instance().Info("Crosshair proj: tanR=%.4f tanU=%.4f fov=%.1f valid=%d | "
                 "clean fwd=(%.3f,%.3f,%.3f) pos=(%.1f,%.1f,%.1f) | "
                 "head fwd=(%.3f,%.3f,%.3f) pos=(%.1f,%.1f,%.1f)",
@@ -271,7 +278,7 @@ void OnPreBeginRendering() {
     // rotation but keeps the head-tracked position, so at GUI draw time the
     // game's projection matrix is (clean rotation, head position). Anything
     // the GUI projects through that matrix gets translation parallax for
-    // free — leaning shifts the world anchor's screen position the same way
+    // free - leaning shifts the world anchor's screen position the same way
     // it shifts the rendered scene, so the marker tracks the target without
     // any help from us. Only rotation needs to be compensated manually
     // (because the rotation was reset to clean).

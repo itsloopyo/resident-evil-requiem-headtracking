@@ -88,9 +88,6 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
     g_hotkeyPoller.SetToggleKey(config.toggleKey, NavGuarded([]() {
         RE9HT::Mod::Instance().Toggle();
     }));
-    g_hotkeyPoller.SetRecenterKey(config.recenterKey, NavGuarded([]() {
-        RE9HT::Mod::Instance().Recenter();
-    }));
     g_hotkeyPoller.AddHotkey(config.positionToggleKey, NavGuarded([]() {
         RE9HT::Mod::Instance().CycleTrackingMode();
     }));
@@ -99,9 +96,6 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
     }));
 
     // Ctrl+Shift+<letter> chord bindings (CLAUDE.md T/Y/U/G/H/J cluster).
-    g_hotkeyPoller.AddHotkey('T', ChordGuarded([]() {
-        RE9HT::Mod::Instance().Recenter();
-    }));
     g_hotkeyPoller.AddHotkey('Y', ChordGuarded([]() {
         RE9HT::Mod::Instance().Toggle();
     }));

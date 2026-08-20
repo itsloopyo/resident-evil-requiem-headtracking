@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "mod.h"
+
+#include <string>
 #include "logger.h"
 #include "camera/game_state_detector.h"
 #include "camera/gui_compensation.h"
@@ -9,6 +11,14 @@
 namespace RE9HT {
 
 using cameraunlock::TrackingMode;
+
+// The session re-reads the receiver's connection locality every Update() and
+// selects LocalSmoothing or RemoteSmoothing from it, but that wiring is
+// SFINAE-gated on the receiver exposing IsRemoteConnection(). A receiver
+// adapter that failed to forward the method would still compile and would
+// silently pin every connection to LocalSmoothing forever.
+static_assert(cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver>::kHasRemoteConnection,
+              "receiver must expose IsRemoteConnection() or remote smoothing never applies");
 
 Mod& Mod::Instance() {
     static Mod instance;
@@ -23,7 +33,7 @@ bool Mod::Initialize() {
 
     Logger::Instance().Info("RE9 Head Tracking v%s initializing...", RE9HT_VERSION);
 
-    // Determine plugin directory (used for config + diagnostic log)
+    // Determine plugin directory (used for config)
     HMODULE hModule = nullptr;
     char dllPath[MAX_PATH] = {};
     if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -49,17 +59,44 @@ bool Mod::Initialize() {
     Logger::Instance().Info("Sensitivity: yaw=%.2f pitch=%.2f roll=%.2f",
                             sensitivity.yaw, sensitivity.pitch, sensitivity.roll);
 
+    Logger::Instance().Info("Smoothing: local=%.2f remote=%.2f",
+                            m_config.localSmoothing, m_config.remoteSmoothing);
+
     m_session.SetMode(m_config.positionEnabled ? TrackingMode::RotationAndPosition
                                                : TrackingMode::RotationOnly);
     m_worldSpaceYaw = m_config.worldSpaceYaw;
 
-    cameraunlock::PositionSettings posSettings(
-        m_config.positionSensitivityX, m_config.positionSensitivityY, m_config.positionSensitivityZ,
-        m_config.positionLimitX, m_config.positionLimitY, m_config.positionLimitZ, m_config.positionLimitZBack,
-        m_config.positionSmoothing,
-        m_config.positionInvertX, m_config.positionInvertY, m_config.positionInvertZ
-    );
+    // Assigned by name rather than through the positional constructor.
+    // PositionSettings takes nine floats before its three inversion bools, so a
+    // positional call that gains or loses one argument silently rebinds a bool
+    // to a float parameter - an invert flag would land in a smoothing slot - and
+    // still compiles clean. Naming every field removes that failure mode.
+    cameraunlock::PositionSettings posSettings;
+    posSettings.sensitivity_x = m_config.positionSensitivityX;
+    posSettings.sensitivity_y = m_config.positionSensitivityY;
+    posSettings.sensitivity_z = m_config.positionSensitivityZ;
+    posSettings.limit_x = m_config.positionLimitX;
+    posSettings.limit_y = m_config.positionLimitY;
+    // Asymmetric Z: negative z is the forward lean, so the generous limit_z is
+    // the forward range and limit_z_back restricts leaning back into the player.
+    posSettings.limit_z = m_config.positionLimitZ;
+    posSettings.limit_z_back = m_config.positionLimitZBack;
+    // Position smoothing lives on the settings; the processor picks between the
+    // two per connection from the flag the session feeds it.
+    posSettings.local_smoothing = m_config.localSmoothing;
+    posSettings.remote_smoothing = m_config.remoteSmoothing;
+    posSettings.invert_x = m_config.positionInvertX;
+    posSettings.invert_y = m_config.positionInvertY;
+    posSettings.invert_z = m_config.positionInvertZ;
     m_session.GetPositionProcessor().SetSettings(posSettings);
+
+    // Rotation smoothing. The session setter also re-writes the two values into
+    // the position settings above, so it has to run after SetSettings; the
+    // values are identical either way, which keeps rotation and position from
+    // ever drifting apart.
+    m_session.SetLocalSmoothing(m_config.localSmoothing);
+    m_session.SetRemoteSmoothing(m_config.remoteSmoothing);
+
     // The previous per-mod pipeline never engaged tracker pivot compensation
     // (it passed radians to a degrees API, zeroing the artifact). Keep that
     // tuning until pivot compensation is verified in game.
@@ -69,19 +106,26 @@ bool Mod::Initialize() {
                             IsPositionEnabled() ? "6DOF" : "3DOF",
                             posSettings.sensitivity_x, posSettings.sensitivity_y, posSettings.sensitivity_z);
 
-    // Start UDP receiver
-    if (!m_udpReceiver.Start(m_config.udpPort)) {
-        Logger::Instance().Error("UDP receiver failed to start on port %d", m_config.udpPort);
-        return false;
+    // Forwarded so the core receiver's bind result, retry progress and latched
+    // first-packet line reach the log. Set before Start so the bind is captured.
+    m_udpReceiver.SetLog([](const std::string& msg) {
+        Logger::Instance().Info("UDP: %s", msg.c_str());
+    });
+
+    // A busy port is not fatal: the core receiver's supervisor thread keeps
+    // retrying, so tracking comes up on its own once the port frees. Returning
+    // false here aborted plugin init before the render callback was registered,
+    // so the camera never ran and nothing could report the recovery.
+    if (m_udpReceiver.Start(m_config.udpPort)) {
+        Logger::Instance().Info("UDP receiver started on port %d", m_config.udpPort);
+    } else {
+        Logger::Instance().Warning("UDP port %d busy - retrying in background", m_config.udpPort);
     }
-    Logger::Instance().Info("UDP receiver started on port %d", m_config.udpPort);
 
     if (m_config.autoEnable) {
         m_enabled.store(true);
         Logger::Instance().Info("Head tracking auto-enabled");
     }
-
-    InitDiagnosticLog();
 
     m_initialized.store(true);
     Logger::Instance().Info("Initialization complete");
@@ -92,12 +136,6 @@ void Mod::Shutdown() {
     if (!m_initialized.load()) return;
 
     Logger::Instance().Info("Shutting down...");
-    if (m_diagFile) {
-        fflush(m_diagFile);
-        fclose(m_diagFile);
-        m_diagFile = nullptr;
-        Logger::Instance().Info("Diagnostic log closed");
-    }
     m_udpReceiver.Stop();
     m_initialized.store(false);
     Logger::Instance().Info("Shutdown complete");
@@ -109,6 +147,7 @@ bool Mod::LoadConfig() {
     if (!m_config.Load(configPath.c_str())) {
         m_config.SetDefaults();
         m_config.Save(configPath.c_str());
+        Logger::Instance().Warning("Config not found at %s - defaults written there", configPath.c_str());
         return false;
     }
     return true;
@@ -123,12 +162,6 @@ void Mod::SetEnabled(bool enabled) {
 
 void Mod::Toggle() {
     SetEnabled(!m_enabled.load());
-}
-
-void Mod::Recenter() {
-    m_session.Recenter();
-    m_lastFrameTickTime = 0;
-    Logger::Instance().Info("View recentered");
 }
 
 void Mod::CycleTrackingMode() {
@@ -159,30 +192,19 @@ void Mod::TickFrame() {
     m_lastDeltaTime = deltaTime;
 
     if (!m_session.Update(deltaTime)) return;
+}
 
-    if (m_diagFile) {
-        const auto& raw = m_session.GetLastRaw();
-        const auto& interpolated = m_session.GetLastInterpolated();
-        const auto& processed = m_session.GetLastProcessed();
+void Mod::LogFirstTrackerPose() {
+    if (!m_initialized.load()) return;
+    if (m_loggedFirstPose) return;
 
-        double timeMs = (now - m_diagStartTime) / 1000.0;
-        double deltMs = deltaTime * 1000.0;
-        const char* marker = "";
-        if (m_diagMarkerPending) {
-            m_diagMarkerPending = false;
-            m_diagMarkerCount++;
-            marker = (m_diagMarkerCount == 1) ? "TOBII_END" : "APP_START";
-        }
-        fprintf(m_diagFile,
-            "%.3f,%.3f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s\n",
-            timeMs, deltMs,
-            raw.yaw, raw.pitch, raw.roll,
-            m_session.WasNewSample() ? 1 : 0,
-            interpolated.yaw, interpolated.pitch, interpolated.roll,
-            processed.yaw, processed.pitch, processed.roll,
-            marker);
-        fflush(m_diagFile);
-    }
+    float yaw = 0.0f, pitch = 0.0f, roll = 0.0f;
+    if (!m_udpReceiver.GetRotation(yaw, pitch, roll)) return;
+
+    m_loggedFirstPose = true;
+    Logger::Instance().Info("First tracker pose received: yaw=%.2f pitch=%.2f roll=%.2f (%s connection)",
+                            yaw, pitch, roll,
+                            m_udpReceiver.IsRemoteConnection() ? "remote" : "local");
 }
 
 bool Mod::GetProcessedRotation(float& yaw, float& pitch, float& roll) {
@@ -198,13 +220,6 @@ void Mod::ToggleYawMode() {
     Logger::Instance().Info("Yaw mode: %s", m_worldSpaceYaw ? "world-space (horizon-locked)" : "camera-local");
 }
 
-void Mod::PlaceDiagnosticMarker() {
-    m_diagMarkerPending = true;
-    Logger::Instance().Info("Diagnostic marker %d placed", m_diagMarkerCount + 1);
-    // Also trigger game state diagnostic burst
-    RE9HT::TriggerGameStateDiag();
-}
-
 void Mod::ToggleMarkersHidden() {
     bool now = !m_markersHidden.load();
     m_markersHidden.store(now);
@@ -212,19 +227,6 @@ void Mod::ToggleMarkersHidden() {
     // Re-arm the element dumper so the next few frames capture fresh state
     // (e.g. Visible=true while actually looking at an interactable).
     ResetGuiElementDumper();
-}
-
-void Mod::InitDiagnosticLog() {
-    std::string diagPath = m_pluginDir + "HeadTracking_diag.csv";
-    m_diagFile = fopen(diagPath.c_str(), "w");
-    if (m_diagFile) {
-        fprintf(m_diagFile,
-            "time_ms,delta_ms,raw_yaw,raw_pitch,raw_roll,is_new_sample,"
-            "interp_yaw,interp_pitch,interp_roll,proc_yaw,proc_pitch,proc_roll,marker\n");
-        fflush(m_diagFile);
-        m_diagStartTime = cameraunlock::time::QpcNowMicros();
-        Logger::Instance().Info("Diagnostic log: %s", diagPath.c_str());
-    }
 }
 
 } // namespace RE9HT

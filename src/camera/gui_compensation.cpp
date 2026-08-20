@@ -20,7 +20,10 @@ namespace RE9HT {
 
 namespace ref = cameraunlock::reframework;
 
-// GUI method cache — only the live methods needed for compensation.
+// Cap on unique crosshair GameObject names recorded during discovery logging.
+constexpr size_t kMaxLoggedCrosshairGOs = 100;
+
+// GUI method cache - only the live methods needed for compensation.
 static struct {
     reframework::API::ManagedObject* playObjectRuntimeType = nullptr;
     reframework::API::Method* guiFindObjectsByType = nullptr;
@@ -42,7 +45,7 @@ void InitGUICompensationMethods() {
     g_guiMethods.transformGetScale    = ref::FindMethodByParamCount("via.gui.TransformObject", "get_Scale", 0);
     g_guiMethods.transformGetGlobalPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "get_GlobalPosition", 0);
 
-    // via.gui.GUI.findObjects — the 1-arg overload taking a System.Type.
+    // via.gui.GUI.findObjects - the 1-arg overload taking a System.Type.
     g_guiMethods.guiFindObjectsByType = ref::FindMethodByParamTypeName("via.gui.GUI", "findObjects", "Type");
 
     Logger::Instance().Info("GUI compensation methods: playObjType=%p findObjects(Type)=%p setPos=%p getGlobalPos=%p",
@@ -106,8 +109,12 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
     }
 
     {
+        // Capped: the 120-frame interval alone streams for the whole
+        // session, which buries the startup chain a user is asked to send.
         static int s_diagFrame = 0;
-        if ((s_diagFrame++ % 120) == 0) {
+        static int s_diagFrameLeft = 5;
+        if (s_diagFrameLeft > 0 && (s_diagFrame++ % 120) == 0) {
+            s_diagFrameLeft--;
             Logger::Instance().Info("CROSSHAIR ApplyCrosshairOffset: descendants=%u deltaX=%.1f deltaY=%.1f",
                 descendantCount, deltaX, deltaY);
         }
@@ -181,8 +188,12 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
         std::vector<void*> absArgs = { (void*)&absPos[0] };
         g_guiMethods.transformSetPosition->invoke(layoutElem, absArgs);
 
+        // Capped: the 120-frame interval alone streams for the whole
+        // session, which buries the startup chain a user is asked to send.
         static int s_verifyFrame = 0;
-        if ((s_verifyFrame++ % 120) == 0 && g_guiMethods.transformGetGlobalPosition) {
+        static int s_verifyLeft = 5;
+        if (s_verifyLeft > 0 && (s_verifyFrame++ % 120) == 0 && g_guiMethods.transformGetGlobalPosition) {
+            s_verifyLeft--;
             auto gpCheck = g_guiMethods.transformGetGlobalPosition->invoke(layoutElem, ref::EmptyArgs());
             if (!gpCheck.exception_thrown) {
                 float rx = *reinterpret_cast<float*>(&gpCheck.bytes[0]);
@@ -202,7 +213,7 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
 // restores clean rotation but keeps the head-tracked position, so at GUI
 // draw time the camera matrix is (clean rotation, head position). Anything
 // the GUI projects through that matrix already accounts for head
-// translation — the world anchor's screen position naturally shifts with
+// translation - the world anchor's screen position naturally shifts with
 // the lean, matching where the rendered scene shows the target. Adding a
 // translation contribution here would double-compensate.
 //
@@ -215,7 +226,7 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
 // position by the same roll so both terms share the roll factor.
 //
 // Note: this differs from Subnautica/Unity siblings (CanvasCompensation.cs),
-// where roll is *not* baked into the camera projection — there the offset is
+// where roll is *not* baked into the camera projection - there the offset is
 // computed with roll=0 and the rotation is applied separately to the marker.
 // Here roll IS in the camera matrix so the offset already carries it.
 static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
@@ -250,8 +261,12 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     std::vector<void*> zeroArgs = { (void*)&zeroPos[0] };
     g_guiMethods.transformSetPosition->invoke(child1, zeroArgs);
 
+    // Capped: the 120-frame interval alone streams for the whole session,
+    // which buries the startup chain a user is asked to send.
     static int s_markerDiagFrame = 0;
-    bool markerDiag = ((s_markerDiagFrame++ % 120) == 0);
+    static int s_markerDiagLeft = 5;
+    bool markerDiag = (s_markerDiagLeft > 0 && (s_markerDiagFrame++ % 120) == 0);
+    if (markerDiag) s_markerDiagLeft--;
 
     float markerX = 0.f, markerY = 0.f;
     bool hasMarkerAnchor = false;
@@ -292,8 +307,8 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     // Why not a single direction-space reprojection through the measured
     // clean-to-head rotation: for pure roll that reprojection collapses
     // (the FOV/aspect terms cancel) to a flat screen rotation by -roll, i.e.
-    // the OPPOSITE sense to the rolled HUD. On an off-centre anchor — which is
-    // exactly what moving the aim with the mouse produces — that counter-roll
+    // the OPPOSITE sense to the rolled HUD. On an off-centre anchor - which is
+    // exactly what moving the aim with the mouse produces - that counter-roll
     // reads as perpendicular drift: a vertical anchor offset wanders
     // horizontally, a horizontal offset wanders vertically. A flat screen
     // rotation matches how the engine rolls the 2D HUD, with no such drift.
@@ -319,7 +334,8 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     {
         static cameraunlock::math::SmoothedFloat s_markerDeltaX;
         static cameraunlock::math::SmoothedFloat s_markerDeltaY;
-        constexpr float kSmoothing = static_cast<float>(cameraunlock::math::kBaselineSmoothing);
+        // Internal projection-smoothing constant, deliberately independent of the user's tracking smoothing.
+        constexpr float kSmoothing = 0.15f;
         float dt = Mod::Instance().GetLastDeltaTime();
         deltaX = s_markerDeltaX.Update(deltaX, kSmoothing, dt);
         deltaY = s_markerDeltaY.Update(deltaY, kSmoothing, dt);
@@ -385,7 +401,8 @@ bool OnPreGuiDrawElement(void* element, void* context) {
                              && (strncmp(goName, "Gui_ui2010", 10) != 0);
     if (isCrosshairCandidate && g_crosshair.valid) {
         static std::unordered_set<std::string> s_loggedCrosshairGOs;
-        if (s_loggedCrosshairGOs.insert(std::string(goName)).second) {
+        if (s_loggedCrosshairGOs.size() < kMaxLoggedCrosshairGOs
+            && s_loggedCrosshairGOs.insert(std::string(goName)).second) {
             Logger::Instance().Info("Crosshair offset target: GO=\"%s\"", goName);
         }
         ApplyCrosshairOffset(mo);

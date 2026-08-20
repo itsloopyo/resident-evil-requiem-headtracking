@@ -3,7 +3,6 @@
 #include "config.h"
 #include <cameraunlock/protocol/udp_receiver.h>
 #include <cameraunlock/tracking/head_tracking_session.h>
-#include <cstdio>
 #include <string>
 
 namespace RE9HT {
@@ -19,10 +18,8 @@ public:
     void SetEnabled(bool enabled);
     void Toggle();
 
-    void Recenter();
     void CycleTrackingMode();
     void ToggleYawMode();
-    void PlaceDiagnosticMarker();
     void ToggleMarkersHidden();
 
     Config& GetConfig() { return m_config; }
@@ -36,6 +33,11 @@ public:
     // camera advancing on a partial-frame dt while position smoothing sees
     // an even smaller one.
     void TickFrame();
+
+    // Latches the first tracker packet. Called from an ungated point in the
+    // render callback: the answer to "did the tracker ever send anything"
+    // must not depend on tracking being enabled or the camera hook engaging.
+    void LogFirstTrackerPose();
 
     bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
     bool GetPositionOffset(float& x, float& y, float& z);
@@ -53,7 +55,6 @@ private:
     ~Mod() = default;
 
     bool LoadConfig();
-    void InitDiagnosticLog();
 
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_initialized{false};
@@ -64,15 +65,12 @@ private:
     cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver> m_session{m_udpReceiver};
     bool m_worldSpaceYaw = false;
 
+    bool m_loggedFirstPose = false;
+
     uint64_t m_lastFrameTickTime = 0;
     float m_lastDeltaTime = 0.016f;
 
-    // Diagnostic logging
     std::string m_pluginDir;
-    FILE* m_diagFile = nullptr;
-    uint64_t m_diagStartTime = 0;
-    bool m_diagMarkerPending = false;
-    int m_diagMarkerCount = 0;
 };
 
 } // namespace RE9HT
