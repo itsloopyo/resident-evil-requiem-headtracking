@@ -15,7 +15,7 @@ include(FetchContent)
 FetchContent_Declare(
     minhook
     GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
-    GIT_TAG        master
+    GIT_TAG        d94c64d32ea37bc4f5ee47d580709f70c6fb6080  # v1.3.4-14, 2026-06-13
 )
 FetchContent_MakeAvailable(minhook)
 
