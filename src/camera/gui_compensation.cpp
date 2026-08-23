@@ -6,10 +6,8 @@
 #include "core/mod.h"
 #include "core/logger.h"
 
-#include <cameraunlock/math/smoothing_utils.h>
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/reframework/re_math.h>
-#include <cameraunlock/rendering/gui_marker_compensation.h>
 
 #include <reframework/API.hpp>
 #include <unordered_set>
@@ -20,8 +18,11 @@ namespace RE9HT {
 
 namespace ref = cameraunlock::reframework;
 
-// Cap on unique crosshair GameObject names recorded during discovery logging.
-constexpr size_t kMaxLoggedCrosshairGOs = 100;
+// Cap on unique GUI GameObject names recorded during identity logging.
+constexpr size_t kMaxLoggedGuiIdentities = 100;
+
+// "layout" - the node both the reticle write and the identity probe target.
+constexpr uint32_t kLayoutChildIdx = 2;
 
 // GUI method cache - only the live methods needed for compensation.
 static struct {
@@ -29,9 +30,9 @@ static struct {
     reframework::API::Method* guiFindObjectsByType = nullptr;
     reframework::API::Method* transformSetPosition = nullptr;
     reframework::API::Method* transformGetPosition = nullptr;
-    reframework::API::Method* transformSetScale    = nullptr;
-    reframework::API::Method* transformGetScale    = nullptr;
-    reframework::API::Method* transformGetGlobalPosition = nullptr;
+    reframework::API::Method* transformSetRotation = nullptr;
+    reframework::API::Method* transformGetRotation = nullptr;
+    reframework::API::Method* viewGetScreenSize    = nullptr;
 } g_guiMethods;
 
 void InitGUICompensationMethods() {
@@ -41,212 +42,240 @@ void InitGUICompensationMethods() {
 
     g_guiMethods.transformSetPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "set_Position", 1);
     g_guiMethods.transformGetPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "get_Position", 0);
-    g_guiMethods.transformSetScale    = ref::FindMethodByParamCount("via.gui.TransformObject", "set_Scale", 1);
-    g_guiMethods.transformGetScale    = ref::FindMethodByParamCount("via.gui.TransformObject", "get_Scale", 0);
-    g_guiMethods.transformGetGlobalPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "get_GlobalPosition", 0);
+    g_guiMethods.transformSetRotation = ref::FindMethodByParamCount("via.gui.TransformObject", "set_Rotation", 1);
+    g_guiMethods.transformGetRotation = ref::FindMethodByParamCount("via.gui.TransformObject", "get_Rotation", 0);
+
+    // The canvas centre the marker roll term rotates about. Read per GUI from
+    // its own View rather than assuming 1920x1080.
+    g_guiMethods.viewGetScreenSize = ref::FindMethodByParamCount("via.gui.View", "get_ScreenSize", 0);
 
     // via.gui.GUI.findObjects - the 1-arg overload taking a System.Type.
     g_guiMethods.guiFindObjectsByType = ref::FindMethodByParamTypeName("via.gui.GUI", "findObjects", "Type");
 
-    Logger::Instance().Info("GUI compensation methods: playObjType=%p findObjects(Type)=%p setPos=%p getGlobalPos=%p",
+    Logger::Instance().Info("GUI compensation methods: playObjType=%p findObjects(Type)=%p setPos=%p "
+        "setRot=%p viewGetScreenSize=%p",
         (void*)g_guiMethods.playObjectRuntimeType,
         (void*)g_guiMethods.guiFindObjectsByType,
         (void*)g_guiMethods.transformSetPosition,
-        (void*)g_guiMethods.transformGetGlobalPosition);
+        (void*)g_guiMethods.transformSetRotation,
+        (void*)g_guiMethods.viewGetScreenSize);
 }
 
-// --- FOV helpers ---
+// --- Canvas geometry ---
 
-static bool GetMarkerProjectionFocalLengths(float& fx, float& fy) {
-    fx = 0.f;
-    fy = 0.f;
-    constexpr float kHalfW = 960.f;
-    constexpr float kHalfH = 540.f;
+// The GUI canvas this element is laid out on, read from its own View. Every
+// screen-space constant in this file used to be hardcoded to 1920x1080, which
+// silently mislocates the crosshair and the marker rotation pivot on any other
+// canvas. Each GUI carries its own size, so this is per element, not global.
+static bool GetCanvasSize(reframework::API::ManagedObject* guiMo, float& canvasW, float& canvasH) {
+    if (!g_guiMethods.viewGetScreenSize) return false;
 
-    float fov = CameraResolver().ResolveFovDegrees();
-    if (!cameraunlock::rendering::FocalLengthsFromVerticalFov(fov, kHalfW, kHalfH, fx, fy)) {
-        return false;
+    auto viewRet = guiMo->invoke("get_View", ref::EmptyArgs());
+    if (viewRet.exception_thrown || !viewRet.ptr) return false;
+    auto view = reinterpret_cast<reframework::API::ManagedObject*>(viewRet.ptr);
+    auto sizeRet = g_guiMethods.viewGetScreenSize->invoke(view, ref::EmptyArgs());
+    if (sizeRet.exception_thrown) return false;
+
+    canvasW = *reinterpret_cast<float*>(&sizeRet.bytes[0]);
+    canvasH = *reinterpret_cast<float*>(&sizeRet.bytes[4]);
+    return canvasW > 100.f && canvasW < 16384.f && canvasH > 100.f && canvasH < 16384.f;
+}
+
+// Pixel focal length for a canvas. Square pixels, so fx == fy == halfH /
+// tan(fovY/2) at any canvas width - the aspect term cancels.
+static float CanvasFocalLength(float canvasH, float fovDegrees) {
+    return (canvasH * 0.5f) / tanf(fovDegrees * DEG_TO_RAD * 0.5f);
+}
+
+// --- GUI identity ---
+
+// One-shot per GUI name. The reticle GUI has never been observed in a log, so
+// which Gui_ui20* GUI it is was assumed rather than known, and the assumption
+// was wrong: the offset was landing on Gui_ui2000 and Gui_ui2050, both HUD.
+//
+// A reticle marks the aim direction, and the aim direction projects to the
+// canvas centre in the clean view, so the reticle GUI is the one whose layout
+// node sits natively at the canvas centre. That is what this records, for every
+// Gui_ui20* GUI, so the target can be identified from a session where the
+// player aims rather than guessed at again.
+static void LogGuiIdentity(reframework::API::ManagedObject* guiMo, const char* goName) {
+    if (!g_guiMethods.guiFindObjectsByType || !g_guiMethods.playObjectRuntimeType
+        || !g_guiMethods.transformGetPosition) {
+        return;
     }
 
-    static bool s_fallbackLogged = false;
-    if (!s_fallbackLogged) {
-        Logger::Instance().Info("Marker focal lengths: assuming get_FOV %.1f is vertical -> fx=%.1f fy=%.1f",
-            fov, fx, fy);
-        s_fallbackLogged = true;
+    static std::unordered_set<std::string> s_logged;
+    if (s_logged.size() >= kMaxLoggedGuiIdentities) return;
+    if (!s_logged.insert(std::string(goName)).second) return;
+
+    float canvasW = 0.f, canvasH = 0.f;
+    if (!GetCanvasSize(guiMo, canvasW, canvasH)) return;
+
+    std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
+    auto arrRet = g_guiMethods.guiFindObjectsByType->invoke(guiMo, findArgs);
+    if (arrRet.exception_thrown || !arrRet.ptr) return;
+    auto arr = reinterpret_cast<reframework::API::ManagedObject*>(arrRet.ptr);
+    auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
+    if (lenRet.exception_thrown || lenRet.dword <= kLayoutChildIdx) return;
+
+    auto layout = ref::ArrayGetValue(arr, (int)kLayoutChildIdx);
+    if (!layout) return;
+
+    char childName[64] = "?";
+    auto nameRet = layout->invoke("get_Name", ref::EmptyArgs());
+    if (!nameRet.exception_thrown && nameRet.ptr) {
+        ref::ReadManagedString(nameRet.ptr, childName, sizeof(childName));
     }
-    return true;
+
+    auto posRet = g_guiMethods.transformGetPosition->invoke(layout, ref::EmptyArgs());
+    if (posRet.exception_thrown) return;
+    float px = *reinterpret_cast<float*>(&posRet.bytes[0]);
+    float py = *reinterpret_cast<float*>(&posRet.bytes[4]);
+
+    bool atCentre = fabsf(px - canvasW * 0.5f) < 1.f && fabsf(py - canvasH * 0.5f) < 1.f;
+    Logger::Instance().Info(
+        "GUI identity: \"%s\" canvas=(%.0fx%.0f) objects=%u child[%u]=\"%s\" nativePos=(%.1f,%.1f)%s",
+        goName, canvasW, canvasH, lenRet.dword, kLayoutChildIdx, childName, px, py,
+        atCentre ? " [at canvas centre - reticle shape]" : " [not at centre - screen-anchored HUD]");
 }
 
 // --- Crosshair compensation ---
 
-static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
+// Moves the reticle to where the clean aim direction projects in the
+// head-rotated view, so shots land where the reticle is drawn.
+//
+// Only ever called for a reticle GUI. It used to be called for every Gui_ui20*
+// except the marker GUI, which in practice meant Gui_ui2000 and Gui_ui2050 -
+// the HUD and the item list - and never a reticle, since no reticle GUI appears
+// in any captured log. Screen-anchored HUD needs no compensation at all: it is
+// drawn in screen space, so head rotation does not move what it labels.
+//
+// The absolute write is canvas centre plus the aim offset, with no baseline
+// capture, because a reticle marks the aim direction and that direction
+// projects to the canvas centre in the clean view. A GUI whose layout node is
+// not natively at the centre is not a reticle, which is what LogGuiIdentity
+// records.
+static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const char* goName) {
     if (!guiMo || !g_guiMethods.guiFindObjectsByType || !g_guiMethods.playObjectRuntimeType
         || !g_guiMethods.transformSetPosition) {
         return;
     }
     if (!g_crosshair.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
 
-    float fovRad = g_crosshair.fovDegrees * DEG_TO_RAD;
-    float tanHalfFovY = tanf(fovRad * 0.5f);
-    constexpr float kCanvasW = 1920.0f;
-    constexpr float kCanvasH = 1080.0f;
-    float aspect = kCanvasW / kCanvasH;
-    float tanHalfFovX = tanHalfFovY * aspect;
+    float canvasW = 0.f, canvasH = 0.f;
+    if (!GetCanvasSize(guiMo, canvasW, canvasH)) return;
+    const float centreX = canvasW * 0.5f;
+    const float centreY = canvasH * 0.5f;
+    const float focal = CanvasFocalLength(canvasH, g_crosshair.fovDegrees);
 
-    float deltaX = -(g_crosshair.tanRight / tanHalfFovX) * (kCanvasW * 0.5f);
-    float deltaY = (g_crosshair.tanUp / tanHalfFovY) * (kCanvasH * 0.5f);
+    const float deltaX = -g_crosshair.tanRight * focal;
+    const float deltaY = g_crosshair.tanUp * focal;
 
-    // Count descendants to distinguish small elements (crosshair) from large HUD containers.
-    uint32_t descendantCount = 0;
-    {
-        std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
-        auto arrRet = g_guiMethods.guiFindObjectsByType->invoke(guiMo, findArgs);
-        if (!arrRet.exception_thrown && arrRet.ptr) {
-            auto arr = reinterpret_cast<reframework::API::ManagedObject*>(arrRet.ptr);
-            auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
-            if (!lenRet.exception_thrown) descendantCount = lenRet.dword;
-        }
-    }
+    std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
+    auto arrRet = g_guiMethods.guiFindObjectsByType->invoke(guiMo, findArgs);
+    if (arrRet.exception_thrown || !arrRet.ptr) return;
+    auto arr = reinterpret_cast<reframework::API::ManagedObject*>(arrRet.ptr);
+    auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
+    if (lenRet.exception_thrown || lenRet.dword <= kLayoutChildIdx) return;
 
-    {
-        // Capped: the 120-frame interval alone streams for the whole
-        // session, which buries the startup chain a user is asked to send.
-        static int s_diagFrame = 0;
-        static int s_diagFrameLeft = 5;
-        if (s_diagFrameLeft > 0 && (s_diagFrame++ % 120) == 0) {
-            s_diagFrameLeft--;
-            Logger::Instance().Info("CROSSHAIR ApplyCrosshairOffset: descendants=%u deltaX=%.1f deltaY=%.1f",
-                descendantCount, deltaX, deltaY);
-        }
-    }
+    auto layoutElem = ref::ArrayGetValue(arr, (int)kLayoutChildIdx);
+    if (!layoutElem) return;
 
-    float pos[3] = { deltaX, deltaY, 0.f };
-    std::vector<void*> setArgs = { (void*)&pos[0] };
+    float absPos[3] = { centreX + deltaX, centreY + deltaY, 0.f };
+    std::vector<void*> absArgs = { (void*)&absPos[0] };
+    g_guiMethods.transformSetPosition->invoke(layoutElem, absArgs);
 
-    if (descendantCount > 100) {
-        // LARGE ELEMENT: iterate View children, apply roll rotation if needed.
-        auto viewRet = guiMo->invoke("get_View", ref::EmptyArgs());
-        if (viewRet.exception_thrown || !viewRet.ptr) return;
-        auto view = reinterpret_cast<reframework::API::ManagedObject*>(viewRet.ptr);
-
-        auto childrenRet = view->invoke("getChildren", ref::EmptyArgs());
-        if (childrenRet.exception_thrown || !childrenRet.ptr) return;
-        auto childArr = reinterpret_cast<reframework::API::ManagedObject*>(childrenRet.ptr);
-        auto lenRet = childArr->invoke("get_Length", ref::EmptyArgs());
-        uint32_t count = lenRet.exception_thrown ? 0 : lenRet.dword;
-
-        float absRoll = fabsf(g_crosshair.rollDegrees);
-        bool applyRoll = (absRoll > 0.1f) && g_guiMethods.transformGetGlobalPosition;
-
-        uint32_t cap = count < 64 ? count : 64;
-        if (applyRoll) {
-            float rollRad = g_crosshair.rollDegrees * DEG_TO_RAD;
-            float cosR = cosf(rollRad);
-            float sinR = sinf(rollRad);
-            float zeroPos[3] = { 0.f, 0.f, 0.f };
-            std::vector<void*> zeroArgs = { (void*)&zeroPos[0] };
-
-            for (uint32_t i = 0; i < cap; i++) {
-                auto elem = ref::ArrayGetValue(childArr, (int)i);
-                if (!elem) continue;
-
-                g_guiMethods.transformSetPosition->invoke(elem, zeroArgs);
-                auto gpRet = g_guiMethods.transformGetGlobalPosition->invoke(elem, ref::EmptyArgs());
-                if (gpRet.exception_thrown) continue;
-
-                float gx = *reinterpret_cast<float*>(&gpRet.bytes[0]);
-                float gy = *reinterpret_cast<float*>(&gpRet.bytes[4]);
-
-                float rotX = gx * cosR - gy * sinR;
-                float rotY = gx * sinR + gy * cosR;
-
-                float finalPos[3] = { (rotX - gx) + deltaX, (rotY - gy) + deltaY, 0.f };
-                std::vector<void*> finalArgs = { (void*)&finalPos[0] };
-                g_guiMethods.transformSetPosition->invoke(elem, finalArgs);
-            }
-        } else {
-            for (uint32_t i = 0; i < cap; i++) {
-                auto elem = ref::ArrayGetValue(childArr, (int)i);
-                if (!elem) continue;
-                g_guiMethods.transformSetPosition->invoke(elem, setArgs);
-            }
-        }
-    } else {
-        // CROSSHAIR ELEMENT: target child[2] "layout" at baseline Position=(960,540,0).
-        constexpr uint32_t kLayoutChildIdx = 2;
-        std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
-        auto arrRet = g_guiMethods.guiFindObjectsByType->invoke(guiMo, findArgs);
-        if (arrRet.exception_thrown || !arrRet.ptr) return;
-        auto arr = reinterpret_cast<reframework::API::ManagedObject*>(arrRet.ptr);
-        auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
-        if (lenRet.exception_thrown || lenRet.dword <= kLayoutChildIdx) return;
-
-        auto layoutElem = ref::ArrayGetValue(arr, (int)kLayoutChildIdx);
-        if (!layoutElem) return;
-
-        float absPos[3] = { 960.0f + deltaX, 540.0f + deltaY, 0.f };
-        std::vector<void*> absArgs = { (void*)&absPos[0] };
-        g_guiMethods.transformSetPosition->invoke(layoutElem, absArgs);
-
-        // Capped: the 120-frame interval alone streams for the whole
-        // session, which buries the startup chain a user is asked to send.
-        static int s_verifyFrame = 0;
-        static int s_verifyLeft = 5;
-        if (s_verifyLeft > 0 && (s_verifyFrame++ % 120) == 0 && g_guiMethods.transformGetGlobalPosition) {
-            s_verifyLeft--;
-            auto gpCheck = g_guiMethods.transformGetGlobalPosition->invoke(layoutElem, ref::EmptyArgs());
-            if (!gpCheck.exception_thrown) {
-                float rx = *reinterpret_cast<float*>(&gpCheck.bytes[0]);
-                float ry = *reinterpret_cast<float*>(&gpCheck.bytes[4]);
-                Logger::Instance().Info("CROSSHAIR layout[2]: wrote=(%.1f,%.1f) readback=(%.1f,%.1f)",
-                    absPos[0], absPos[1], rx, ry);
-            }
-        }
+    // Capped: the 120-frame interval alone streams for the whole
+    // session, which buries the startup chain a user is asked to send.
+    static int s_diagFrame = 0;
+    static int s_diagLeft = 5;
+    if (s_diagLeft > 0 && (s_diagFrame++ % 120) == 0) {
+        s_diagLeft--;
+        Logger::Instance().Info("CROSSHAIR \"%s\": canvas=(%.0fx%.0f) centre=(%.1f,%.1f) focal=%.1f "
+            "delta=(%.1f,%.1f) wrote=(%.1f,%.1f)",
+            goName, canvasW, canvasH, centreX, centreY, focal, deltaX, deltaY, absPos[0], absPos[1]);
     }
 }
 
 // --- Marker compensation ---
 
-// Decomposition: marker_final = R_2d(roll) · (marker_native + rotation_offset)
+// The GUI writes each marker's projected screen position into that marker's own
+// node ("type0", flat PlayObject index in the 800s), and every ancestor up to
+// "main" (child[1]) sits at (0,0). So a write to "main" transforms the whole set
+// of markers at once, which is what makes a container transform the right shape
+// here rather than a per-marker hunt.
 //
-// Translation parallax is *not* compensated here. OnPostBeginRendering
-// restores clean rotation but keeps the head-tracked position, so at GUI
-// draw time the camera matrix is (clean rotation, head position). Anything
-// the GUI projects through that matrix already accounts for head
-// translation - the world anchor's screen position naturally shifts with
-// the lean, matching where the rendered scene shows the target. Adding a
-// translation contribution here would double-compensate.
+// The map from the clean-rotation projection the engine performs to the
+// head-rotated one the scene was rendered with is, to an affine approximation,
+// a rotation by head roll about the canvas centre plus a translation for
+// yaw/pitch:
 //
-// What we *do* need to compensate is rotation, because the rotation was
-// reset to clean in OnPostBeginRendering. g_marker.tanRight / tanUp is
-// computed by projecting clean.fwd through the head-rotated basis without
-// any head-position contribution, so it carries pure rotation parallax.
-// Roll is baked into the head basis (q = Ry · Rx · Rz in ApplyHeadTracking)
-// so the offset already encodes it; we then rotate the native marker
-// position by the same roll so both terms share the roll factor.
+//   marker_final = R(roll) * (marker_native - C) + C + T
 //
-// Note: this differs from Subnautica/Unity siblings (CanvasCompensation.cs),
-// where roll is *not* baked into the camera projection - there the offset is
-// computed with roll=0 and the rotation is applied separately to the marker.
-// Here roll IS in the camera matrix so the offset already carries it.
+// which a single container transform expresses exactly as
+//
+//   main.Rotation = roll
+//   main.Position = C - R(roll) * C + T
+//
+// The rotation sign follows the camera: ApplyHeadTracking rotates the camera
+// basis by +roll about its forward axis, so a view tangent t maps to
+// t' = Rz(roll) * t, and under the canvas mapping (x = -f*t.x + Cx,
+// y = +f*t.y + Cy) that is a canvas-space rotation by +roll with the standard
+// [[cos,-sin],[sin,cos]] matrix.
+//
+// T owns yaw/pitch alone: g_marker.tanRight / tanUp come from projecting the
+// clean forward axis through the head basis, and roll leaves the forward axis
+// fixed, so they collapse to ~0 under pure roll. The two terms are orthogonal.
+//
+// Translation parallax is not compensated. OnPostBeginRendering restores clean
+// rotation but keeps the head-tracked position, so the engine's own projection
+// already accounts for the lean; adding it here would double-compensate.
+//
+// What this replaces: the old roll term read PlayObject index 28 as the
+// "marker's native screen position" and rotated it about the canvas ORIGIN.
+// Index 28 is "bg_panel", a design-time layout panel whose global position is
+// the constant (80,-46) on every frame regardless of where the marker is, so
+// the term injected a fixed ~92px*roll shift that was identical for a marker at
+// screen centre and one at the edge, and never applied the real correction,
+// which scales with distance from the centre.
 static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     if (!guiMo || !g_guiMethods.guiFindObjectsByType || !g_guiMethods.playObjectRuntimeType
-        || !g_guiMethods.transformSetPosition || !g_guiMethods.transformGetGlobalPosition) {
+        || !g_guiMethods.transformSetPosition || !g_guiMethods.transformSetRotation
+        || !g_guiMethods.viewGetScreenSize) {
         return;
     }
     if (!g_crosshair.valid || !g_marker.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
 
-    float fx = 0.f, fy = 0.f;
-    if (!GetMarkerProjectionFocalLengths(fx, fy)) return;
     const float fovDeg = g_crosshair.fovDegrees;
     if (fovDeg < 10.f) return;
-    const float tanHFovY = tanf(fovDeg * DEG_TO_RAD * 0.5f);
-    constexpr float kHalfW_ = 960.f;
-    constexpr float kHalfH_ = 540.f;
-    const float aspect_ = kHalfW_ / kHalfH_;
-    const float tanHFovX = tanHFovY * aspect_;
 
-    // Resolve child[1].
+    // Canvas centre read from this GUI's own View. The rotation pivots on it, so
+    // unlike the translation-only compensation that preceded this, a wrong
+    // centre is not a scale error but a visible swing around the wrong point.
+    float canvasW = 0.f, canvasH = 0.f;
+    if (!GetCanvasSize(guiMo, canvasW, canvasH)) return;
+
+    const float centreX = canvasW * 0.5f;
+    const float centreY = canvasH * 0.5f;
+    const float focal = CanvasFocalLength(canvasH, fovDeg);
+
+    const float offsetX = -g_marker.tanRight * focal;
+    const float offsetY =  g_marker.tanUp * focal;
+
+    const float rollDeg = g_crosshair.rollDegrees;
+    const float rollRad = rollDeg * DEG_TO_RAD;
+    const float cosR = cosf(rollRad);
+    const float sinR = sinf(rollRad);
+
+    const float deltaX = centreX - (centreX * cosR - centreY * sinR) + offsetX;
+    const float deltaY = centreY - (centreX * sinR + centreY * cosR) + offsetY;
+
+    // Deliberately unsmoothed. Every input is already smoothed upstream (the
+    // tracking pipeline for roll, kProjectionSmoothing for the tangents and
+    // FOV), and smoothing the translation while the rotation went through
+    // unsmoothed would put the pivot correction out of phase with the rotation
+    // it is correcting for - markers would swing on every roll change.
+
     std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
     auto arrRet = g_guiMethods.guiFindObjectsByType->invoke(guiMo, findArgs);
     if (arrRet.exception_thrown || !arrRet.ptr) return;
@@ -257,103 +286,31 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     auto child1 = ref::ArrayGetValue(arr, 1);
     if (!child1) return;
 
-    float zeroPos[3] = { 0.f, 0.f, 0.f };
-    std::vector<void*> zeroArgs = { (void*)&zeroPos[0] };
-    g_guiMethods.transformSetPosition->invoke(child1, zeroArgs);
+    float pos[3] = { deltaX, deltaY, 0.f };
+    std::vector<void*> posArgs = { (void*)&pos[0] };
+    g_guiMethods.transformSetPosition->invoke(child1, posArgs);
+
+    float rot[3] = { 0.f, 0.f, rollDeg };
+    std::vector<void*> rotArgs = { (void*)&rot[0] };
+    g_guiMethods.transformSetRotation->invoke(child1, rotArgs);
 
     // Capped: the 120-frame interval alone streams for the whole session,
     // which buries the startup chain a user is asked to send.
     static int s_markerDiagFrame = 0;
     static int s_markerDiagLeft = 5;
-    bool markerDiag = (s_markerDiagLeft > 0 && (s_markerDiagFrame++ % 120) == 0);
-    if (markerDiag) s_markerDiagLeft--;
-
-    float markerX = 0.f, markerY = 0.f;
-    bool hasMarkerAnchor = false;
-
-    constexpr uint32_t kMarkerAnchorCandidateIndex = 28;
-    if (lenRet.dword > kMarkerAnchorCandidateIndex) {
-        auto anchor = ref::ArrayGetValue(arr, (int)kMarkerAnchorCandidateIndex);
-        if (anchor) {
-            auto gpAnchor = g_guiMethods.transformGetGlobalPosition->invoke(anchor, ref::EmptyArgs());
-            if (!gpAnchor.exception_thrown) {
-                float ax = *reinterpret_cast<float*>(&gpAnchor.bytes[0]);
-                float ay = *reinterpret_cast<float*>(&gpAnchor.bytes[4]);
-                if (std::isfinite(ax) && std::isfinite(ay)
-                    && fabsf(ax) <= 2400.f && fabsf(ay) <= 1600.f) {
-                    markerX = ax;
-                    markerY = ay;
-                    hasMarkerAnchor = true;
-                }
-            }
+    if (s_markerDiagLeft > 0 && (s_markerDiagFrame++ % 120) == 0) {
+        s_markerDiagLeft--;
+        float readBack = 0.f;
+        if (g_guiMethods.transformGetRotation) {
+            auto rotRet = g_guiMethods.transformGetRotation->invoke(child1, ref::EmptyArgs());
+            if (!rotRet.exception_thrown) readBack = *reinterpret_cast<float*>(&rotRet.bytes[8]);
         }
-    }
-
-    if (!hasMarkerAnchor) {
-        auto gp = g_guiMethods.transformGetGlobalPosition->invoke(child1, ref::EmptyArgs());
-        if (!gp.exception_thrown) {
-            markerX = *reinterpret_cast<float*>(&gp.bytes[0]);
-            markerY = *reinterpret_cast<float*>(&gp.bytes[4]);
-            hasMarkerAnchor = std::isfinite(markerX) && std::isfinite(markerY);
-        }
-    }
-
-    // Marker compensation = yaw/pitch translation + a 2D roll rotation of the
-    // anchor about screen centre, the two sharing one roll factor. This is the
-    // same decomposition the large-HUD-element path applies to the rolled HUD
-    // container (see ApplyCrosshairOffset), and it must use the same roll sign
-    // so markers and HUD agree.
-    //
-    // Why not a single direction-space reprojection through the measured
-    // clean-to-head rotation: for pure roll that reprojection collapses
-    // (the FOV/aspect terms cancel) to a flat screen rotation by -roll, i.e.
-    // the OPPOSITE sense to the rolled HUD. On an off-centre anchor - which is
-    // exactly what moving the aim with the mouse produces - that counter-roll
-    // reads as perpendicular drift: a vertical anchor offset wanders
-    // horizontally, a horizontal offset wanders vertically. A flat screen
-    // rotation matches how the engine rolls the 2D HUD, with no such drift.
-    //
-    // tanRight/tanUp from the forward projection carry the yaw/pitch screen
-    // shift (they collapse to ~0 under pure roll, since the roll axis is the
-    // view forward), so the roll rotation owns roll and the offset owns
-    // yaw/pitch.
-    const float offsetX = -g_marker.tanRight * fx;
-    const float offsetY =  g_marker.tanUp * fy;
-
-    const float rollR = g_crosshair.rollDegrees * DEG_TO_RAD;
-    const float cosR = cosf(rollR);
-    const float sinR = sinf(rollR);
-    const float rotX = markerX * cosR - markerY * sinR;
-    const float rotY = markerX * sinR + markerY * cosR;
-
-    float deltaX = (rotX - markerX) + offsetX;
-    float deltaY = (rotY - markerY) + offsetY;
-
-    // Smooth marker delta to eliminate jitter from FOV fluctuations and
-    // anchor readback variance.
-    {
-        static cameraunlock::math::SmoothedFloat s_markerDeltaX;
-        static cameraunlock::math::SmoothedFloat s_markerDeltaY;
-        // Internal projection-smoothing constant, deliberately independent of the user's tracking smoothing.
-        constexpr float kSmoothing = 0.15f;
-        float dt = Mod::Instance().GetLastDeltaTime();
-        deltaX = s_markerDeltaX.Update(deltaX, kSmoothing, dt);
-        deltaY = s_markerDeltaY.Update(deltaY, kSmoothing, dt);
-    }
-
-    if (markerDiag) {
         Logger::Instance().Info(
-            "Marker comp: roll=%.1f anchor=(%.1f,%.1f) tanR=%.4f tanU=%.4f offset=(%.1f,%.1f) delta=(%.1f,%.1f)",
-            g_crosshair.rollDegrees,
-            markerX, markerY,
-            g_marker.tanRight, g_marker.tanUp,
-            offsetX, offsetY,
-            deltaX, deltaY);
+            "Marker comp: canvas=(%.0fx%.0f) centre=(%.1f,%.1f) focal=%.1f roll=%.1f "
+            "tanR=%.4f tanU=%.4f offset=(%.1f,%.1f) delta=(%.1f,%.1f) rot.z readback=%.1f",
+            canvasW, canvasH, centreX, centreY, focal, rollDeg,
+            g_marker.tanRight, g_marker.tanUp, offsetX, offsetY, deltaX, deltaY, readBack);
     }
-
-    float pos[3] = { deltaX, deltaY, 0.f };
-    std::vector<void*> setArgs = { (void*)&pos[0] };
-    g_guiMethods.transformSetPosition->invoke(child1, setArgs);
 }
 
 // --- Main dispatcher ---
@@ -391,21 +348,24 @@ bool OnPreGuiDrawElement(void* element, void* context) {
     ScanGuiGoName(goName, tns, tnm);
     TryDumpGuiElement(mo, td, goName, goMo);
 
+    if (strncmp(goName, "Gui_ui20", 8) == 0) {
+        LogGuiIdentity(mo, goName);
+    }
+
     // MARKER COMPENSATION
     if (strncmp(goName, "Gui_ui2010", 10) == 0) {
         ApplyMarkerCompensation(mo);
     }
 
     // CROSSHAIR COMPENSATION
-    bool isCrosshairCandidate = (strncmp(goName, "Gui_ui20", 8) == 0)
-                             && (strncmp(goName, "Gui_ui2010", 10) != 0);
-    if (isCrosshairCandidate && g_crosshair.valid) {
-        static std::unordered_set<std::string> s_loggedCrosshairGOs;
-        if (s_loggedCrosshairGOs.size() < kMaxLoggedCrosshairGOs
-            && s_loggedCrosshairGOs.insert(std::string(goName)).second) {
-            Logger::Instance().Info("Crosshair offset target: GO=\"%s\"", goName);
-        }
-        ApplyCrosshairOffset(mo);
+    // Gui_ui2020 alone. LogGuiIdentity confirms it is the reticle: 71 objects,
+    // child[2] "layout", sitting natively at the canvas centre (960,540) on a
+    // 1920x1080 canvas. Every other Gui_ui20* is screen-anchored HUD and stays
+    // where the game puts it - Gui_ui2000's layout at (960,960), Gui_ui2050's
+    // item list at (0,0), and Gui_ui2021, whose child[2] is a "gauge" at (0,0)
+    // despite the "secondary crosshair element" it was long labelled.
+    if (strncmp(goName, "Gui_ui2020", 10) == 0 && g_crosshair.valid) {
+        ApplyCrosshairOffset(mo, goName);
     }
 
     // HIDE GATE

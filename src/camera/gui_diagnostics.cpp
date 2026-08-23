@@ -20,9 +20,9 @@ namespace ref = cameraunlock::reframework;
 // get dumped.
 static const char* const g_dumpGoNameAllowPrefixes[] = {
     "Gui_ui2010",  // world-anchored interaction prompt
-    "Gui_ui2020",  // crosshair/reticle
-    "Gui_ui2021",  // secondary crosshair element
-    "Gui_ui2050",  // ammo display
+    "Gui_ui2020",  // reticle: 71 objects, layout node at the canvas centre
+    "Gui_ui2021",  // gauge (not a crosshair element, despite the old label)
+    "Gui_ui2050",  // item list
 };
 
 static std::unordered_set<std::string> g_dumpedGuiKeys;
@@ -44,6 +44,7 @@ void DiscoverGUICameraAccess() {
     ref::LogMethodOverloads("via.gui.GUICamera", "get_ScreenOffset");
     ref::LogMethodOverloads("via.gui.GUI", "findObjects");
     ref::LogMethodOverloads("via.gui.GUI", "getObject");
+    ref::EnumerateMethods("via.gui.View", {});
     ref::EnumerateMethods("via.gui.PlayObject", {});
     ref::EnumerateMethods("via.gui.TransformObject", {});
     ref::EnumerateMethods("via.gui.Control", {});
