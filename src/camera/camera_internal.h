@@ -24,6 +24,9 @@ extern float g_C[3][3];
 extern bool g_C_valid;
 extern float g_posCleanX, g_posCleanY, g_posCleanZ;
 
+// Camera position after the lean is applied - the eye the frame is drawn from.
+extern float g_headPos[3];
+
 // Shared resolver for the primary camera chain (transform, camera, live FOV).
 cameraunlock::reframework::CameraTransformResolver& CameraResolver();
 

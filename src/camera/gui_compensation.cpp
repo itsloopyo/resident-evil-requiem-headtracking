@@ -81,10 +81,14 @@ static bool GetCanvasSize(reframework::API::ManagedObject* guiMo, float& canvasW
     return canvasW > 100.f && canvasW < 16384.f && canvasH > 100.f && canvasH < 16384.f;
 }
 
-// Pixel focal length for a canvas. Square pixels, so fx == fy == halfH /
-// tan(fovY/2) at any canvas width - the aspect term cancels.
-static float CanvasFocalLength(float canvasH, float fovDegrees) {
-    return (canvasH * 0.5f) / tanf(fovDegrees * DEG_TO_RAD * 0.5f);
+// Pixel focal lengths, from the camera's own projection matrix. Scaling the NDC
+// factor against half the canvas in each axis carries the aspect ratio the
+// engine actually renders with, so nothing here has to assume whether get_FOV
+// means the vertical or the horizontal angle - see CrosshairProjection.
+static void CanvasFocalLengths(float canvasW, float canvasH,
+                               float& focalX, float& focalY) {
+    focalX = g_crosshair.ndcPerTanX * canvasW * 0.5f;
+    focalY = g_crosshair.ndcPerTanY * canvasH * 0.5f;
 }
 
 // --- GUI identity ---
@@ -139,6 +143,23 @@ static void LogGuiIdentity(reframework::API::ManagedObject* guiMo, const char* g
         atCentre ? " [at canvas centre - reticle shape]" : " [not at centre - screen-anchored HUD]");
 }
 
+// Canvas offsets from the aim tangents.
+//
+// The camera basis rows are (left, up, forward), confirmed on logged clean/head
+// forward pairs - here the head is pitched DOWN, so the aim sits ABOVE the view
+// centre, and tanUp comes back positive:
+//   clean fwd=(0.907,0.074,-0.415) head fwd=(0.921,-0.117,-0.373) tanU=+0.2079
+// and here the head turned left while the aim projects right, so row 0 is left:
+//   clean fwd=(0.423,0,-0.906) head fwd=(0.298,0.089,-0.950) tanR=-0.1359
+//
+// Hence the horizontal negates and the vertical does not. The vertical sign is
+// empirical, not derived: it depends on which way the GUI canvas runs, and the
+// canvas both places markers and rotates them, so reasoning it out from the
+// design-time layout offsets got it backwards once already. Flipping it made
+// the reticle track the head instead of the aim. Leave it as measured.
+static inline float AimCanvasOffsetX(float tanRight, float focalX) { return -tanRight * focalX; }
+static inline float AimCanvasOffsetY(float tanUp, float focalY)    { return  tanUp * focalY; }
+
 // --- Crosshair compensation ---
 
 // Moves the reticle to where the clean aim direction projects in the
@@ -166,10 +187,9 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
     if (!GetCanvasSize(guiMo, canvasW, canvasH)) return;
     const float centreX = canvasW * 0.5f;
     const float centreY = canvasH * 0.5f;
-    const float focal = CanvasFocalLength(canvasH, g_crosshair.fovDegrees);
-
-    const float deltaX = -g_crosshair.tanRight * focal;
-    const float deltaY = g_crosshair.tanUp * focal;
+    // NDC runs -1..+1 with y up; the canvas runs 0..height with y down.
+    const float deltaX =  g_crosshair.ndcX * canvasW * 0.5f;
+    const float deltaY = -g_crosshair.ndcY * canvasH * 0.5f;
 
     std::vector<void*> findArgs = { (void*)g_guiMethods.playObjectRuntimeType };
     auto arrRet = g_guiMethods.guiFindObjectsByType->invoke(guiMo, findArgs);
@@ -181,6 +201,21 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
     auto layoutElem = ref::ArrayGetValue(arr, (int)kLayoutChildIdx);
     if (!layoutElem) return;
 
+    // Where the reticle sat before this write. The absolute write below assumes
+    // the game parks its reticle at the canvas centre and leaves it there, so
+    // that centre plus our offset is the whole story. If the game moves it
+    // itself - for weapon sway, recoil, or a sight whose convergence depends on
+    // range - then overwriting it discards that and leaves an error the mod
+    // cannot see. One read says which.
+    float before[3] = { 0.f, 0.f, 0.f };
+    {
+        auto preRet = g_guiMethods.transformGetPosition->invoke(layoutElem, ref::EmptyArgs());
+        if (!preRet.exception_thrown) {
+            before[0] = *reinterpret_cast<float*>(&preRet.bytes[0]);
+            before[1] = *reinterpret_cast<float*>(&preRet.bytes[4]);
+        }
+    }
+
     float absPos[3] = { centreX + deltaX, centreY + deltaY, 0.f };
     std::vector<void*> absArgs = { (void*)&absPos[0] };
     g_guiMethods.transformSetPosition->invoke(layoutElem, absArgs);
@@ -191,9 +226,11 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
     static int s_diagLeft = 5;
     if (s_diagLeft > 0 && (s_diagFrame++ % 120) == 0) {
         s_diagLeft--;
-        Logger::Instance().Info("CROSSHAIR \"%s\": canvas=(%.0fx%.0f) centre=(%.1f,%.1f) focal=%.1f "
-            "delta=(%.1f,%.1f) wrote=(%.1f,%.1f)",
-            goName, canvasW, canvasH, centreX, centreY, focal, deltaX, deltaY, absPos[0], absPos[1]);
+        Logger::Instance().Info("CROSSHAIR \"%s\": canvas=(%.0fx%.0f) centre=(%.1f,%.1f) "
+            "ndc=(%.4f,%.4f) delta=(%.1f,%.1f) before=(%.1f,%.1f) wrote=(%.1f,%.1f)",
+            goName, canvasW, canvasH, centreX, centreY,
+            g_crosshair.ndcX, g_crosshair.ndcY, deltaX, deltaY,
+            before[0], before[1], absPos[0], absPos[1]);
     }
 }
 
@@ -223,13 +260,13 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
 // y = +f*t.y + Cy) that is a canvas-space rotation by +roll with the standard
 // [[cos,-sin],[sin,cos]] matrix.
 //
-// T owns yaw/pitch alone: g_marker.tanRight / tanUp come from projecting the
-// clean forward axis through the head basis, and roll leaves the forward axis
-// fixed, so they collapse to ~0 under pure roll. The two terms are orthogonal.
+// T owns yaw/pitch alone: the aim tangents come from projecting the clean
+// forward axis through the head basis, and roll leaves the forward axis fixed,
+// so they collapse to ~0 under pure roll. The two terms are orthogonal.
 //
-// Translation parallax is not compensated. OnPostBeginRendering restores clean
-// rotation but keeps the head-tracked position, so the engine's own projection
-// already accounts for the lean; adding it here would double-compensate.
+// Translation parallax is not compensated: it is lean/depth and this is one
+// transform for every marker at once, so no single value can be right for more
+// than one of them. See MarkerProjection.
 //
 // What this replaces: the old roll term read PlayObject index 28 as the
 // "marker's native screen position" and rotated it about the canvas ORIGIN.
@@ -244,7 +281,7 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
         || !g_guiMethods.viewGetScreenSize) {
         return;
     }
-    if (!g_crosshair.valid || !g_marker.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
+    if (!g_crosshair.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
 
     const float fovDeg = g_crosshair.fovDegrees;
     if (fovDeg < 10.f) return;
@@ -257,10 +294,15 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
 
     const float centreX = canvasW * 0.5f;
     const float centreY = canvasH * 0.5f;
-    const float focal = CanvasFocalLength(canvasH, fovDeg);
+    float focalX = 0.f, focalY = 0.f;
+    CanvasFocalLengths(canvasW, canvasH, focalX, focalY);
 
-    const float offsetX = -g_marker.tanRight * focal;
-    const float offsetY =  g_marker.tanUp * focal;
+    // Rotation only. The reticle's tangents carry parallax at the distance the
+    // gun is pointing, which is the wrong depth for every marker that is not
+    // sitting on the crosshair - see MarkerProjection.
+    if (!g_marker.valid) return;
+    const float offsetX = AimCanvasOffsetX(g_marker.tanRight, focalX);
+    const float offsetY = AimCanvasOffsetY(g_marker.tanUp, focalY);
 
     const float rollDeg = g_crosshair.rollDegrees;
     const float rollRad = rollDeg * DEG_TO_RAD;
@@ -306,9 +348,9 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
             if (!rotRet.exception_thrown) readBack = *reinterpret_cast<float*>(&rotRet.bytes[8]);
         }
         Logger::Instance().Info(
-            "Marker comp: canvas=(%.0fx%.0f) centre=(%.1f,%.1f) focal=%.1f roll=%.1f "
+            "Marker comp: canvas=(%.0fx%.0f) centre=(%.1f,%.1f) focal=(%.1f,%.1f) roll=%.1f "
             "tanR=%.4f tanU=%.4f offset=(%.1f,%.1f) delta=(%.1f,%.1f) rot.z readback=%.1f",
-            canvasW, canvasH, centreX, centreY, focal, rollDeg,
+            canvasW, canvasH, centreX, centreY, focalX, focalY, rollDeg,
             g_marker.tanRight, g_marker.tanUp, offsetX, offsetY, deltaX, deltaY, readBack);
     }
 }
