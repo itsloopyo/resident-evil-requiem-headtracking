@@ -99,9 +99,6 @@ bool Config::Load(const char* path) {
     positionLimitY = reader.ReadFloat("Position", "LimitY", positionLimitY);
     positionLimitZ = reader.ReadFloat("Position", "LimitZ", positionLimitZ);
     positionLimitZBack = reader.ReadFloat("Position", "LimitZBack", positionLimitZBack);
-    positionInvertX = reader.ReadBool("Position", "InvertX", positionInvertX);
-    positionInvertY = reader.ReadBool("Position", "InvertY", positionInvertY);
-    positionInvertZ = reader.ReadBool("Position", "InvertZ", positionInvertZ);
     positionEnabled = reader.ReadBool("Position", "Enabled", positionEnabled);
 
     flashlightTracking = reader.ReadBool("Flashlight", "Enabled", flashlightTracking);
@@ -153,9 +150,6 @@ bool Config::Save(const char* path) const {
     file << "LimitY=" << positionLimitY << "\n";
     file << "LimitZ=" << positionLimitZ << "\n";
     file << "LimitZBack=" << positionLimitZBack << "\n";
-    file << "InvertX=" << (positionInvertX ? "true" : "false") << "\n";
-    file << "InvertY=" << (positionInvertY ? "true" : "false") << "\n";
-    file << "InvertZ=" << (positionInvertZ ? "true" : "false") << "\n";
     file << "Enabled=" << (positionEnabled ? "true" : "false") << "\n\n";
 
     file << "[Flashlight]\n";

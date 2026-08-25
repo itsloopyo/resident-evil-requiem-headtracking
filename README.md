@@ -111,12 +111,6 @@ LimitX=0.30                 ; Max lateral offset in meters
 LimitY=0.20                 ; Max vertical offset in meters
 LimitZ=0.40                 ; Max forward offset in meters
 LimitZBack=0.10             ; Max backward offset (prevents clipping)
-; Invert lateral axis
-InvertX=true
-; Invert vertical axis
-InvertY=false
-; Invert depth axis
-InvertZ=false
 ; Enable/disable 6DOF
 Enabled=true
 
@@ -163,8 +157,8 @@ Delete the file to reset to defaults.
 - Increase `RemoteSmoothing` (phone or other network tracker) or `LocalSmoothing` (tracker on this PC) in the `[Smoothing]` section of HeadTracking.ini
 - If using a phone app over WiFi, some jitter is expected
 
-**Wrong rotation axis:**
-- Adjust sensitivity multipliers or use the Invert settings in the Position section
+**View leans or turns the wrong way:**
+- Fix it in your tracker (OpenTrack's axis mapping, or your phone app's settings) rather than here. The mod converts the protocol's axes to the engine's once and deliberately offers no inversion of its own, so one tracker profile behaves the same across every game.
 
 ## Updating
 

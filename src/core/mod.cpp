@@ -85,9 +85,17 @@ bool Mod::Initialize() {
     // two per connection from the flag the session feeds it.
     posSettings.local_smoothing = m_config.localSmoothing;
     posSettings.remote_smoothing = m_config.remoteSmoothing;
-    posSettings.invert_x = m_config.positionInvertX;
-    posSettings.invert_y = m_config.positionInvertY;
-    posSettings.invert_z = m_config.positionInvertZ;
+    // Protocol-to-engine axis conversion, fixed here rather than exposed.
+    //
+    // The tracker owns pose shaping; a mod converts conventions once, at the
+    // boundary, and a user must not be able to undo it. These were INI knobs,
+    // and the lateral lean was only coming out the right way because InvertX
+    // defaulting to true happened to cancel the negation the camera boundary
+    // applies. One INI edit reversed the lean, and a reversed lean reads as
+    // working until the reticle has to agree with it.
+    posSettings.invert_x = true;
+    posSettings.invert_y = false;
+    posSettings.invert_z = false;
     m_session.GetPositionProcessor().SetSettings(posSettings);
 
     // Rotation smoothing. The session setter also re-writes the two values into

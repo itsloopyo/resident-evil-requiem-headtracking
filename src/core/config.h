@@ -33,9 +33,6 @@ struct Config {
     float positionLimitY = 0.20f;
     float positionLimitZ = 0.40f;
     float positionLimitZBack = 0.10f;
-    bool positionInvertX = true;
-    bool positionInvertY = false;
-    bool positionInvertZ = false;
     bool positionEnabled = true;
 
     // Flashlight. The beam is rotated by the head pose scaled by
