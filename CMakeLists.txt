@@ -34,6 +34,7 @@ add_library(RE9HeadTracking SHARED
     src/core/config.cpp
     src/core/logger.cpp
     src/camera/camera_hook.cpp
+    src/camera/flashlight_hook.cpp
     src/camera/gui_compensation.cpp
     src/camera/gui_diagnostics.cpp
     src/camera/game_state_detector.cpp

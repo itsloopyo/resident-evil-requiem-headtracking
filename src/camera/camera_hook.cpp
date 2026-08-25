@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "camera_hook.h"
 #include "camera_internal.h"
+#include "flashlight_hook.h"
 #include "gui_compensation.h"
 #include "gui_diagnostics.h"
 #include "game_state_detector.h"
@@ -278,6 +279,7 @@ static bool InitCachedFunctions() {
 
     DiscoverGUICameraAccess();
     InitGUICompensationMethods();
+    InitFlashlightAccess();
 
     Logger::Instance().Info("Methods cached");
     return true;
@@ -422,9 +424,11 @@ void OnPreBeginRendering() {
         }
     }
 
+    ApplyFlashlightTracking();
 }
 
 void OnPostBeginRendering() {
+    RestoreFlashlightTracking();
 
     if (!g_trackingAppliedThisFrame) return;
     g_trackingAppliedThisFrame = false;

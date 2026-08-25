@@ -38,6 +38,12 @@ struct Config {
     bool positionInvertZ = false;
     bool positionEnabled = true;
 
+    // Flashlight. The beam is rotated by the head pose scaled by
+    // flashlightMultiplier, so it leads the view instead of matching it. This
+    // is a game-specific light-to-view relationship, not tracker pose shaping.
+    bool flashlightTracking = true;
+    float flashlightMultiplier = 1.5f;
+
     // General
     bool autoEnable = true;
     bool worldSpaceYaw = true;

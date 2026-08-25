@@ -8,6 +8,7 @@ An unofficial, flatscreen head tracking mod for Resident Evil Requiem - no VR he
 
 - **Decoupled look and aim** - head tracking moves the camera; aim stays on your mouse/controller
 - **6DOF positional tracking** - lean and peek with head position
+- **Flashlight follows your head** - the beam leads the view at 1.5x head rotation, so it lights what you glance at
 
 ## Requirements
 
@@ -118,6 +119,11 @@ InvertY=false
 InvertZ=false
 ; Enable/disable 6DOF
 Enabled=true
+
+[Flashlight]
+; Head tracking moves the flashlight beam as well as the view
+Enabled=true
+Multiplier=1.5              ; How far the beam leads the view (0.0-5.0, 1.0 = matches the head)
 
 [Hotkeys]
 ; Virtual key codes (hex)

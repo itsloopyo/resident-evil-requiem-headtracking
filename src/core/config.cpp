@@ -34,6 +34,8 @@ void Config::Validate() {
     positionLimitY = SanitizeFinite(positionLimitY, defaults.positionLimitY, 0.01f, 2.0f);
     positionLimitZ = SanitizeFinite(positionLimitZ, defaults.positionLimitZ, 0.01f, 2.0f);
     positionLimitZBack = SanitizeFinite(positionLimitZBack, defaults.positionLimitZBack, 0.01f, 2.0f);
+
+    flashlightMultiplier = SanitizeFinite(flashlightMultiplier, defaults.flashlightMultiplier, 0.0f, 5.0f);
 }
 
 // Warned once per process rather than once per load: config is reloadable, and
@@ -102,6 +104,9 @@ bool Config::Load(const char* path) {
     positionInvertZ = reader.ReadBool("Position", "InvertZ", positionInvertZ);
     positionEnabled = reader.ReadBool("Position", "Enabled", positionEnabled);
 
+    flashlightTracking = reader.ReadBool("Flashlight", "Enabled", flashlightTracking);
+    flashlightMultiplier = reader.ReadFloat("Flashlight", "Multiplier", flashlightMultiplier);
+
     autoEnable = reader.ReadBool("General", "AutoEnable", autoEnable);
     worldSpaceYaw = reader.ReadBool("General", "WorldSpaceYaw", worldSpaceYaw);
 
@@ -152,6 +157,12 @@ bool Config::Save(const char* path) const {
     file << "InvertY=" << (positionInvertY ? "true" : "false") << "\n";
     file << "InvertZ=" << (positionInvertZ ? "true" : "false") << "\n";
     file << "Enabled=" << (positionEnabled ? "true" : "false") << "\n\n";
+
+    file << "[Flashlight]\n";
+    file << "; Head tracking moves the flashlight beam as well as the view.\n";
+    file << "Enabled=" << (flashlightTracking ? "true" : "false") << "\n";
+    file << "; How far the beam leads the view (1.0 = matches the head, 1.5 = default)\n";
+    file << "Multiplier=" << flashlightMultiplier << "\n\n";
 
     file << "[Hotkeys]\n";
     file << "; Virtual key codes (hex)\n";
