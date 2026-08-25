@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0] - 2026-08-25
+
+### Added
+
+- flashlight beam follows the head, leading the view at 1.5x
+
+### Fixed
+
+- GUI compensation holds under head roll and stops dragging the HUD
+- project the reticle through the engine's own matrices, not by hand
+- bake the position axis conversion in, drop the Invert knobs
+- the reticle takes lean parallax, scaled to what the bullet stops on
+
 ## [0.3.0] - 2026-08-20
 
 ### Added
