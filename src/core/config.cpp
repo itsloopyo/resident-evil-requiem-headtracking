@@ -90,7 +90,6 @@ bool Config::Load(const char* path) {
     toggleKey = reader.ReadHex("Hotkeys", "ToggleKey", toggleKey);
     positionToggleKey = reader.ReadHex("Hotkeys", "PositionToggleKey", positionToggleKey);
     yawModeKey = reader.ReadHex("Hotkeys", "YawModeKey", yawModeKey);
-    diagnosticMarkerKey = reader.ReadHex("Hotkeys", "DiagnosticMarkerKey", diagnosticMarkerKey);
 
     positionSensitivityX = reader.ReadFloat("Position", "SensitivityX", positionSensitivityX);
     positionSensitivityY = reader.ReadFloat("Position", "SensitivityY", positionSensitivityY);
@@ -163,7 +162,6 @@ bool Config::Save(const char* path) const {
     file << "ToggleKey=0x" << std::hex << toggleKey << "    ; End\n";
     file << "PositionToggleKey=0x" << std::hex << positionToggleKey << " ; Page Up\n";
     file << "YawModeKey=0x" << std::hex << yawModeKey << "      ; Page Down - toggle world/local yaw\n";
-    file << "DiagnosticMarkerKey=0x" << std::hex << diagnosticMarkerKey << " ; F9 - hide/show world-anchored GUI markers\n\n";
 
     file << "[General]\n";
     file << "AutoEnable=" << (autoEnable ? "true" : "false") << "\n";

@@ -1,9 +1,9 @@
 #include "pch.h"
 #include "camera_hook.h"
+#include "aim_trace.h"
 #include "camera_internal.h"
 #include "flashlight_hook.h"
 #include "gui_compensation.h"
-#include "gui_diagnostics.h"
 #include "game_state_detector.h"
 #include "core/mod.h"
 #include "core/logger.h"
@@ -32,7 +32,6 @@ float g_posCleanX = 0.f;
 float g_posCleanY = 0.f;
 float g_posCleanZ = 0.f;
 float g_headPos[3] = {};
-static float g_writtenLean[3] = {};
 
 // Per-frame flag: set true when OnPreBeginRendering applies head tracking.
 static bool g_trackingAppliedThisFrame = false;
@@ -86,6 +85,40 @@ static void* GetCameraTransformCached() {
 // Bringing parallax back needs the vertical sign settled by measurement rather
 // than by flipping it in front of a player, and a distance that is known to be
 // the surface the shot stops on rather than inferred from a collision layer.
+// The lean parallax: the difference between projecting the impact point and
+// projecting the aim direction, through the head-tracked view.
+//
+// Split from the rotation term rather than folded into one projection so the two
+// can carry different signs, which they must. The rotation sign is confirmed in
+// game. The parallax sign that falls out of the geometry is the opposite of what
+// the game does, so the negation below is fitted to where the hole lands rather
+// than derived - a derivation needs to know which row of the camera basis points
+// left and which way the canvas runs vertically, and neither follows from the
+// camera matrix.
+//
+// The 1/distance shape is measured, not assumed. Run with a fixed two metres in
+// place of the trace, the reticle drifted with the lean beyond that range and
+// against it inside, crossing zero exactly at the hardcoded value - which is
+// what a correction that should scale as lean/distance looks like when it is
+// held constant.
+static bool ProjectLeanParallax(const Matrix4x4f& clean, const Matrix4x4f& head,
+                                float aimDist, float& parallaxR, float& parallaxU) {
+    float rotR = 0.f, rotU = 0.f;
+    if (!ref::ProjectForwardToViewTangents(clean, head, rotR, rotU)) return false;
+
+    const float dx = clean.m[3][0] + clean.m[2][0] * aimDist - head.m[3][0];
+    const float dy = clean.m[3][1] + clean.m[2][1] * aimDist - head.m[3][1];
+    const float dz = clean.m[3][2] + clean.m[2][2] * aimDist - head.m[3][2];
+    const float vx = dx * head.m[0][0] + dy * head.m[0][1] + dz * head.m[0][2];
+    const float vy = dx * head.m[1][0] + dy * head.m[1][1] + dz * head.m[1][2];
+    const float vz = dx * head.m[2][0] + dy * head.m[2][1] + dz * head.m[2][2];
+    if (!(vz > 0.1f)) return false;
+
+    parallaxR = -(vx / vz - rotR);
+    parallaxU = -(vy / vz - rotU);
+    return true;
+}
+
 static void ApplyHeadTracking(Matrix4x4f* worldMat) {
     float yaw, pitch, roll;
     if (!Mod::Instance().GetProcessedRotation(yaw, pitch, roll)) return;
@@ -180,57 +213,6 @@ static ref::CameraControllerHooker g_controllerHooker{
 // discovery retries from gameplay frames instead of latching at init.
 // Attempts are spaced out and capped to bound the per-attempt component
 // logging the parent-chain walk produces.
-// Every component on the camera GameObject and its parents.
-//
-// The shared hooker prints only the first 32, and MainCamera carries 43, so the
-// controller this game actually uses may never have appeared in a log - which
-// is why the four hardcoded candidate names have never matched. Runs once, when
-// the hook has given up, and only reads type names.
-static void DumpCameraComponentsOnce(void* cameraTransform) {
-    static bool s_done = false;
-    if (s_done || !cameraTransform) return;
-    s_done = true;
-
-    auto tx = reinterpret_cast<reframework::API::ManagedObject*>(cameraTransform);
-    Logger::Instance().Info("=== CAMERA COMPONENT WALK (full) ===");
-
-    for (int depth = 0; depth < 6 && tx; depth++) {
-        auto goRet = tx->invoke("get_GameObject", ref::EmptyArgs());
-        if (goRet.exception_thrown || !goRet.ptr) break;
-        auto go = reinterpret_cast<reframework::API::ManagedObject*>(goRet.ptr);
-
-        char goName[128] = "?";
-        auto nameRet = go->invoke("get_Name", ref::EmptyArgs());
-        if (!nameRet.exception_thrown && nameRet.ptr) {
-            ref::ReadManagedString(nameRet.ptr, goName, sizeof(goName));
-        }
-
-        auto compsRet = go->invoke("get_Components", ref::EmptyArgs());
-        if (compsRet.exception_thrown || !compsRet.ptr) {
-            Logger::Instance().Info("  parent[%d] GO=\"%s\": no components", depth, goName);
-        } else {
-            auto arr = reinterpret_cast<reframework::API::ManagedObject*>(compsRet.ptr);
-            auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
-            uint32_t count = lenRet.exception_thrown ? 0 : lenRet.dword;
-            Logger::Instance().Info("  parent[%d] GO=\"%s\": %u components", depth, goName, count);
-            for (uint32_t i = 0; i < count; i++) {
-                auto comp = ref::ArrayGetValue(arr, (int)i);
-                if (!comp) continue;
-                auto td = comp->get_type_definition();
-                if (!td) continue;
-                Logger::Instance().Info("    [%u] %s.%s", i,
-                    td->get_namespace() ? td->get_namespace() : "",
-                    td->get_name() ? td->get_name() : "?");
-            }
-        }
-
-        auto parentRet = tx->invoke("get_Parent", ref::EmptyArgs());
-        if (parentRet.exception_thrown || !parentRet.ptr) break;
-        tx = reinterpret_cast<reframework::API::ManagedObject*>(parentRet.ptr);
-    }
-    Logger::Instance().Info("=== END CAMERA COMPONENT WALK ===");
-}
-
 static void TryHookCameraController(void* cameraTransform) {
     constexpr int kMaxAttempts = 5;
     constexpr int kRetryCooldownFrames = 120;
@@ -246,7 +228,6 @@ static void TryHookCameraController(void* cameraTransform) {
         && g_controllerHooker.AttemptCount() >= kMaxAttempts) {
         Logger::Instance().Warning(
             "Camera controller hook not found - aim decoupling relies on PostBeginRendering restore");
-        DumpCameraComponentsOnce(cameraTransform);
     }
 }
 
@@ -277,7 +258,7 @@ static bool InitCachedFunctions() {
             "itself with and stays at the canvas centre");
     }
 
-    DiscoverGUICameraAccess();
+    InitAimTrace();
     InitGUICompensationMethods();
     InitFlashlightAccess();
 
@@ -328,9 +309,6 @@ void OnPreBeginRendering() {
     g_headPos[0] = worldMat->m[3][0];
     g_headPos[1] = worldMat->m[3][1];
     g_headPos[2] = worldMat->m[3][2];
-    g_writtenLean[0] = worldMat->m[3][0] - g_cleanCameraMatrix.matrix.m[3][0];
-    g_writtenLean[1] = worldMat->m[3][1] - g_cleanCameraMatrix.matrix.m[3][1];
-    g_writtenLean[2] = worldMat->m[3][2] - g_cleanCameraMatrix.matrix.m[3][2];
 
     // Compute rotation differential C = R_head * R_clean^T
     ComputeCleanToHeadRotation(g_cleanCameraMatrix.matrix, *worldMat, g_C);
@@ -364,6 +342,14 @@ void OnPreBeginRendering() {
 
         float handR = 0.f, handU = 0.f;
         if (haveProj && ref::ProjectForwardToViewTangents(clean, head, handR, handU)) {
+            float aimDist = 0.f;
+            if (TryGetAimDistance(&clean.m[3][0], &clean.m[2][0], aimDist)) {
+                float leanR = 0.f, leanU = 0.f;
+                if (ProjectLeanParallax(clean, head, aimDist, leanR, leanU)) {
+                    handR += leanR;
+                    handU += leanU;
+                }
+            }
             float rawFov = g_cameraResolver.ResolveFovDegrees(camera);
             if (rawFov <= 0.f) rawFov = g_crosshair.fovDegrees;
 
@@ -440,32 +426,6 @@ void OnPostBeginRendering() {
 
     Matrix4x4f* worldMat = reinterpret_cast<Matrix4x4f*>(
         reinterpret_cast<uint8_t*>(transform) + ref::kTransformWorldMatrixOffset);
-    // Did the engine keep the position we wrote? The dialled-in parallax scale
-    // lands near 1/20, and a constant scale across ranges says the 1/distance
-    // form is right and only the coefficient is wrong - which is what happens
-    // if the eye the frame is drawn from moved by a fraction of what we asked.
-    {
-        static int s_rbFrame = 0;
-        static int s_rbLeft = 30;
-        const float leanLen = sqrtf(g_writtenLean[0]*g_writtenLean[0]
-                                  + g_writtenLean[1]*g_writtenLean[1]
-                                  + g_writtenLean[2]*g_writtenLean[2]);
-        if (s_rbLeft > 0 && leanLen > 0.02f && (s_rbFrame++ % 30) == 0) {
-            s_rbLeft--;
-            const float dx = worldMat->m[3][0] - g_headPos[0];
-            const float dy = worldMat->m[3][1] - g_headPos[1];
-            const float dz = worldMat->m[3][2] - g_headPos[2];
-            const float kept[3] = {
-                worldMat->m[3][0] - g_cleanCameraMatrix.matrix.m[3][0],
-                worldMat->m[3][1] - g_cleanCameraMatrix.matrix.m[3][1],
-                worldMat->m[3][2] - g_cleanCameraMatrix.matrix.m[3][2] };
-            const float keptLen = sqrtf(kept[0]*kept[0] + kept[1]*kept[1] + kept[2]*kept[2]);
-            Logger::Instance().Info(
-                "POSCHECK wrote lean |%.4f| kept |%.4f| ratio=%.4f  drift-from-written=(%.4f,%.4f,%.4f)",
-                leanLen, keptLen, leanLen > 1e-6f ? keptLen/leanLen : 0.f, dx, dy, dz);
-        }
-    }
-
     __try {
         // Restore the clean camera in full - POSITION as well as rotation.
         //

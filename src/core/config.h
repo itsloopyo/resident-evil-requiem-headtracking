@@ -23,7 +23,6 @@ struct Config {
     int toggleKey = DEFAULT_TOGGLE_KEY;
     int positionToggleKey = DEFAULT_POSITION_TOGGLE_KEY;
     int yawModeKey = DEFAULT_YAW_MODE_KEY;
-    int diagnosticMarkerKey = DEFAULT_DIAGNOSTIC_MARKER_KEY;
 
     // Position (6DOF)
     float positionSensitivityX = 1.0f;

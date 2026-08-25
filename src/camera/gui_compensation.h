@@ -10,7 +10,4 @@ void InitGUICompensationMethods();
 // Returns true to keep drawing the element, false to hide.
 bool OnPreGuiDrawElement(void* element, void* context);
 
-// Re-arm the element dumper — called from Mod::ToggleMarkersHidden.
-void ResetGuiElementDumper();
-
 } // namespace RE9HT

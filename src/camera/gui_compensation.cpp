@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "gui_compensation.h"
-#include "gui_diagnostics.h"
 #include "camera_internal.h"
 #include "game_state_detector.h"
 #include "core/mod.h"
@@ -357,15 +356,8 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
 
 // --- Main dispatcher ---
 
-void ResetGuiElementDumper() {
-    ResetGuiDiagnostics();
-}
-
 bool OnPreGuiDrawElement(void* element, void* context) {
     if (!element) return true;
-
-    TryDumpContext(context);
-    TryDumpMatrixDiagnostic();
 
     auto mo = reinterpret_cast<reframework::API::ManagedObject*>(element);
     auto td = mo->get_type_definition();
@@ -385,10 +377,6 @@ bool OnPreGuiDrawElement(void* element, void* context) {
             ref::ReadManagedString(nameRet.ptr, goName, sizeof(goName));
         }
     }
-
-    // Diagnostic scans
-    ScanGuiGoName(goName, tns, tnm);
-    TryDumpGuiElement(mo, td, goName, goMo);
 
     if (strncmp(goName, "Gui_ui20", 8) == 0) {
         LogGuiIdentity(mo, goName);
@@ -410,10 +398,6 @@ bool OnPreGuiDrawElement(void* element, void* context) {
         ApplyCrosshairOffset(mo, goName);
     }
 
-    // HIDE GATE
-    if (Mod::Instance().AreMarkersHidden()) {
-        return false;
-    }
     return true;
 }
 

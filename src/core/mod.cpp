@@ -93,7 +93,12 @@ bool Mod::Initialize() {
     // defaulting to true happened to cancel the negation the camera boundary
     // applies. One INI edit reversed the lean, and a reversed lean reads as
     // working until the reticle has to agree with it.
-    posSettings.invert_x = true;
+    // false, so that the single negation the shared helper applies is the whole
+    // conversion. Setting it true cancelled that helper and left the lateral
+    // lean un-mirrored, which is what the fleet's 27 other mods do NOT do.
+    // Measured: a positive processed x displaced the camera along minus the
+    // camera's lateral axis, and in game the lean came out reversed.
+    posSettings.invert_x = false;
     posSettings.invert_y = false;
     posSettings.invert_z = false;
     m_session.GetPositionProcessor().SetSettings(posSettings);
@@ -226,15 +231,6 @@ bool Mod::GetPositionOffset(float& x, float& y, float& z) {
 void Mod::ToggleYawMode() {
     m_worldSpaceYaw = !m_worldSpaceYaw;
     Logger::Instance().Info("Yaw mode: %s", m_worldSpaceYaw ? "world-space (horizon-locked)" : "camera-local");
-}
-
-void Mod::ToggleMarkersHidden() {
-    bool now = !m_markersHidden.load();
-    m_markersHidden.store(now);
-    Logger::Instance().Info("World-anchored GUI markers: %s", now ? "HIDDEN" : "VISIBLE");
-    // Re-arm the element dumper so the next few frames capture fresh state
-    // (e.g. Visible=true while actually looking at an interactable).
-    ResetGuiElementDumper();
 }
 
 } // namespace RE9HT

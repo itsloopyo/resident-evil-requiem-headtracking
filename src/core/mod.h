@@ -20,7 +20,6 @@ public:
 
     void CycleTrackingMode();
     void ToggleYawMode();
-    void ToggleMarkersHidden();
 
     Config& GetConfig() { return m_config; }
     const Config& GetConfig() const { return m_config; }
@@ -45,7 +44,6 @@ public:
     bool IsRotationEnabled() const { return m_session.IsRotationActive(); }
     bool IsWorldSpaceYaw() const { return m_worldSpaceYaw; }
     float GetLastDeltaTime() const { return m_lastDeltaTime; }
-    bool AreMarkersHidden() const { return m_markersHidden.load(); }
 
     Mod(const Mod&) = delete;
     Mod& operator=(const Mod&) = delete;
@@ -58,7 +56,6 @@ private:
 
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_initialized{false};
-    std::atomic<bool> m_markersHidden{false};
 
     Config m_config;
     cameraunlock::UdpReceiver m_udpReceiver;

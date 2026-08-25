@@ -73,9 +73,10 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
 
     param->functions->on_pre_application_entry("BeginRendering", OnPreBeginRendering);
     param->functions->on_post_application_entry("BeginRendering", OnPostBeginRendering);
-    // on_pre_gui_draw_element gives us per-element access for F9-hide + full info
-    // dump. Cursor-based tracking suppression is disabled in game_state_detector,
-    // so the earlier cursor-flicker interaction no longer affects tracking.
+    // Per-element access, which is what the reticle and marker compensation
+    // hang off. Cursor-based tracking suppression is disabled in
+    // game_state_detector, so the earlier cursor-flicker interaction no longer
+    // affects tracking.
     param->functions->on_pre_gui_draw_element(OnPreGuiDrawElement);
 
     // Set up hotkeys
@@ -105,14 +106,6 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
     g_hotkeyPoller.AddHotkey('H', ChordGuarded([]() {
         RE9HT::Mod::Instance().ToggleYawMode();
     }));
-
-    // F9 (diagnosticMarkerKey slot): toggle hiding of world-anchored GUI markers.
-    // The on_pre_gui_draw_element callback checks AreMarkersHidden() and returns
-    // false for marker elements when the flag is set. Full marker info is dumped
-    // to the log on first sight regardless of the flag.
-    g_hotkeyPoller.AddHotkey(config.diagnosticMarkerKey, []() {
-        RE9HT::Mod::Instance().ToggleMarkersHidden();
-    });
 
     g_hotkeyPoller.Start();
 
