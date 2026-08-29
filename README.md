@@ -1,8 +1,8 @@
 # RE9 Head Tracking
 
-![Mod GIF](https://github.com/itsloopyo/resident-evil-requiem-headtracking/raw/main/assets/readme-clip.gif)
+![Resident Evil Requiem running with this mod](https://raw.githubusercontent.com/itsloopyo/resident-evil-requiem-headtracking/main/assets/readme-clip.gif)
 
-An unofficial, flatscreen head tracking mod for Resident Evil Requiem - no VR headset required. Use a webcam, phone, or any OpenTrack-compatible tracker to look around the environment by moving your head while aiming with your mouse.
+An unofficial head tracking mod for Resident Evil Requiem that moves the view with your head while your mouse or controller keeps aiming, driven by a webcam, phone, or any OpenTrack compatible tracker, with no VR headset required.
 
 ## Features
 
