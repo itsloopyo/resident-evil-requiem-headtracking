@@ -23,8 +23,10 @@ struct CrosshairProjection {
     float ndcY = 0.0f;
     float fovDegrees = 75.0f;
     float rollDegrees = 0.0f;
-    // Normalised device coordinates per unit view tangent, from the projection
-    // matrix ([0][0] and [1][1]). The marker path still works in tangents.
+    // Normalised device coordinates per unit view tangent. Vertical is the
+    // projection matrix's [1][1]; horizontal is derived from it under the
+    // square-pixel guard rather than read from [0][0] - see crosshair.cpp. The
+    // marker path still works in tangents.
     float ndcPerTanX = 0.0f;
     float ndcPerTanY = 0.0f;
     bool valid = false;

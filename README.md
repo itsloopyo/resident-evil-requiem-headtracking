@@ -99,18 +99,13 @@ view sits off to one side, centre it in the tracker.
 
 Two equivalent binding sets - use whichever your keyboard has:
 
-| Action              | Nav-cluster | Chord           |
-|---------------------|-------------|-----------------|
-| Toggle tracking     | `End`       | `Ctrl+Shift+Y`  |
-| Cycle tracking mode | `Page Up`   | `Ctrl+Shift+G`  |
-| Toggle yaw mode     | `Page Down` | `Ctrl+Shift+H`  |
+| Action                     | Nav-cluster | Chord          |
+|----------------------------|-------------|----------------|
+| Toggle tracking            | `End`       | `Ctrl+Shift+Y` |
+| Toggle positional tracking | `Page Up`   | `Ctrl+Shift+G` |
+| Toggle yaw mode            | `Page Down` | `Ctrl+Shift+H` |
 
-`Page Up` / `Ctrl+Shift+G` cycles tracking mode:
-
-1. Normal head-tracked gameplay
-2. Positional tracking disabled, rotational tracking enabled
-3. Rotational tracking disabled, positional tracking enabled
-4. Back to normal
+`Page Up` / `Ctrl+Shift+G` turns positional (6DOF) tracking off and on. Head rotation keeps running either way.
 
 ## Configuration
 

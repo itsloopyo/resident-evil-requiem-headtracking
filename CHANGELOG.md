@@ -35,6 +35,10 @@
 - Troubleshooting now names the log file to send (`<game>/re2_framework_log.txt`, truncated per launch) and the startup lines to look for in it.
 
 ### Changed
+- `Page Up` / `Ctrl+Shift+G` turns positional tracking off and on again instead
+  of cycling three modes. The third mode disabled head rotation, and it sat
+  directly after the mode a `[Position] Enabled=false` config starts in, so one
+  press of a key labelled "toggle position" switched head rotation off.
 - Recentring is gone entirely: the `Home` / `Ctrl+Shift+T` hotkey, the
   `RecenterKey` ini entry, and the mod's own centre. Your tracker owns the
   centre now. Set it there, with OpenTrack's Center bind, the CENTER button in

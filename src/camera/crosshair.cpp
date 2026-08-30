@@ -108,13 +108,26 @@ void OnFrameApplied(const Matrix4x4f& clean, const Matrix4x4f& head) {
         float rawFov = ref::GetCameraResolver().ResolveFovDegrees(camera);
         if (rawFov <= 0.f) rawFov = g_crosshair.fovDegrees;
 
-        // Tangents scaled by the projection matrix's own [0][0] and [1][1].
+        // Square pixels: the horizontal and vertical pixel focal lengths these
+        // NDC factors become have to match. The RE3 build proved this
+        // projection path can hand back [0][0] at half its true value, which
+        // under-compensates yaw and drifts the reticle and the markers
+        // horizontally, so [0][0] is not read at all - the horizontal factor
+        // comes from the trusted [1][1] and the reference canvas aspect. Same
+        // guard core applies as fx = fy in ComputeMarkerFocalLengths, which
+        // covers every path but this one. Derived here, once, because both
+        // consumers scale by it: the reticle NDC below and the marker path
+        // through CanvasFocalLengths.
+        const float ndcPerTanY = proj.m[1][1];
+        const float ndcPerTanX =
+            ndcPerTanY * (ref::kHalfReferenceCanvasHeight / ref::kHalfReferenceCanvasWidth);
+
         // The vertical negation is asymmetric with the horizontal one: this
         // is the sign that moves the reticle against head pitch, verified in
         // game, and flipping it to match sent the reticle off in the
         // direction of the pitch instead.
-        const float rawNdcX = -handR * proj.m[0][0];
-        const float rawNdcY = -handU * proj.m[1][1];
+        const float rawNdcX = -handR * ndcPerTanX;
+        const float rawNdcY = -handU * ndcPerTanY;
 
         static cameraunlock::math::SmoothedFloat s_ndcX;
         static cameraunlock::math::SmoothedFloat s_ndcY;
@@ -123,8 +136,8 @@ void OnFrameApplied(const Matrix4x4f& clean, const Matrix4x4f& head) {
         g_crosshair.ndcX = s_ndcX.Update(rawNdcX, ref::kProjectionSmoothing, dt);
         g_crosshair.ndcY = s_ndcY.Update(rawNdcY, ref::kProjectionSmoothing, dt);
         g_crosshair.fovDegrees = s_fov.Update(rawFov, ref::kProjectionSmoothing, dt);
-        g_crosshair.ndcPerTanX = proj.m[0][0];
-        g_crosshair.ndcPerTanY = proj.m[1][1];
+        g_crosshair.ndcPerTanX = ndcPerTanX;
+        g_crosshair.ndcPerTanY = ndcPerTanY;
         g_crosshair.valid = true;
 
         float roll = 0.f, yaw = 0.f, pitch = 0.f;
