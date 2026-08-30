@@ -1,10 +1,11 @@
 #include "pch.h"
 #include "flashlight_hook.h"
-#include "camera_internal.h"
-#include "core/mod.h"
-#include "core/logger.h"
 
+#include <cameraunlock/reframework/camera_chain.h>
+#include <cameraunlock/reframework/log_callback.h>
 #include <cameraunlock/reframework/managed_utils.h>
+#include <cameraunlock/reframework/plugin_config.h>
+#include <cameraunlock/reframework/plugin_mod.h>
 #include <cameraunlock/reframework/re_math.h>
 
 #include <reframework/API.hpp>
@@ -51,14 +52,14 @@ static struct {
 static reframework::API::ManagedObject* g_controller = nullptr;
 static reframework::API::ManagedObject* g_lightObject = nullptr;
 static reframework::API::ManagedObject* g_lightTransform = nullptr;
-static Matrix4x4f g_savedLightMatrix;
+static ref::Matrix4x4f g_savedLightMatrix;
 static bool g_appliedThisFrame = false;
 static int g_frameCounter = 0;
 static int g_nextControllerResolveFrame = 0;
 static int g_beamLogsLeft = 4;
 
-static Matrix4x4f* WorldMatrix(reframework::API::ManagedObject* transform) {
-    return reinterpret_cast<Matrix4x4f*>(
+static ref::Matrix4x4f* WorldMatrix(reframework::API::ManagedObject* transform) {
+    return reinterpret_cast<ref::Matrix4x4f*>(
         reinterpret_cast<uint8_t*>(transform) + ref::kTransformWorldMatrixOffset);
 }
 
@@ -93,7 +94,7 @@ void InitFlashlightAccess() {
     g_access.failed = !g_access.getCurrentScene || !g_access.findComponents
         || !g_access.getTransform || !g_access.controllerType || !g_access.currentLightObject;
 
-    Logger::Instance().Info("Flashlight access: type=%s getCurrentScene=%p findComponents=%p "
+    ref::LogInfo("Flashlight access: type=%s getCurrentScene=%p findComponents=%p "
         "getTransform=%p %s=%p%s",
         controllerFullName.empty() ? kControllerTypeShortName : controllerFullName.c_str(),
         (void*)g_access.getCurrentScene, (void*)g_access.findComponents,
@@ -145,7 +146,7 @@ static void ResolveController() {
     controller->add_ref();
     g_controller = controller;
     g_beamLogsLeft = 4;
-    Logger::Instance().Info("Flashlight: controller resolved (%u instance(s))", lenRet.dword);
+    ref::LogInfo("Flashlight: controller resolved (%u instance(s))", lenRet.dword);
 }
 
 // Read the pooled beam's GameObject straight off the controller. Done every
@@ -182,7 +183,7 @@ static void ResolveLightTransform() {
 
     if (g_beamLogsLeft > 0) {
         g_beamLogsLeft--;
-        Logger::Instance().Info("Flashlight: beam light object %p -> transform %p",
+        ref::LogInfo("Flashlight: beam light object %p -> transform %p",
             (void*)lightObject, (void*)transform);
     }
 }
@@ -191,7 +192,7 @@ static void ResolveLightTransform() {
 
 static void RotateLight(float yawRad, float pitchRad, float rollRad, bool worldSpaceYaw) {
     __try {
-        Matrix4x4f* m = WorldMatrix(g_lightTransform);
+        ref::Matrix4x4f* m = WorldMatrix(g_lightTransform);
         g_savedLightMatrix = *m;
         if (worldSpaceYaw) {
             ref::ApplyWorldSpaceHeadRotation(*m, yawRad, pitchRad, rollRad);
@@ -208,11 +209,11 @@ static void RestoreLight() {
 }
 
 void ApplyFlashlightTracking() {
-    const Config& config = Mod::Instance().GetConfig();
+    const ref::PluginConfig& config = ref::PluginMod::Instance().GetConfig();
     if (!config.flashlightTracking || g_access.failed) return;
 
     float yaw = 0.f, pitch = 0.f, roll = 0.f;
-    if (!Mod::Instance().GetProcessedRotation(yaw, pitch, roll)) return;
+    if (!ref::PluginMod::Instance().GetProcessedRotation(yaw, pitch, roll)) return;
 
     g_frameCounter++;
     ResolveController();
@@ -226,8 +227,8 @@ void ApplyFlashlightTracking() {
     // view about which way the head turned. Rotating the light about its own
     // basis is what makes the beam lead the view rather than orbit it.
     const float k = config.flashlightMultiplier;
-    RotateLight(-yaw * DEG_TO_RAD * k, pitch * DEG_TO_RAD * k, roll * DEG_TO_RAD * k,
-                Mod::Instance().IsWorldSpaceYaw());
+    RotateLight(-yaw * ref::kDegToRad * k, pitch * ref::kDegToRad * k, roll * ref::kDegToRad * k,
+                ref::PluginMod::Instance().IsWorldSpaceYaw());
     g_appliedThisFrame = true;
 }
 

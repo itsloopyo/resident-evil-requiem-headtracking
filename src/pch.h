@@ -21,11 +21,6 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <iterator>
 
 #include "core/constants.h"
-
-namespace RE9HT {
-    class Mod;
-    struct Config;
-    class Logger;
-}

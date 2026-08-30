@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "aim_trace.h"
-#include "core/logger.h"
 
+#include <cameraunlock/reframework/log_callback.h>
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/reframework/tdb_inspector.h>
 
@@ -21,7 +21,7 @@ static void LogOverloadsVerbose(const char* typeName, const char* methodName) {
     const auto& api = reframework::API::get();
     auto type = api->tdb()->find_type(typeName);
     if (!type) {
-        Logger::Instance().Info("  [trace] type not found: %s", typeName);
+        ref::LogInfo("  [trace] type not found: %s", typeName);
         return;
     }
     int found = 0;
@@ -41,12 +41,12 @@ static void LogOverloadsVerbose(const char* typeName, const char* methodName) {
             sig += params[i].name ? params[i].name : "?";
         }
         auto rt = m->get_return_type();
-        Logger::Instance().Info("  [trace] %s.%s(%s) -> %s  [params=%u]",
+        ref::LogInfo("  [trace] %s.%s(%s) -> %s  [params=%u]",
             typeName, methodName, sig.c_str(),
             rt ? rt->get_full_name().c_str() : "?", m->get_num_params());
     }
     if (found == 0) {
-        Logger::Instance().Info("  [trace] %s has no method named %s", typeName, methodName);
+        ref::LogInfo("  [trace] %s has no method named %s", typeName, methodName);
     }
 }
 
@@ -57,14 +57,14 @@ static void LogTypeFields(const char* typeName) {
     const auto& api = reframework::API::get();
     auto type = api->tdb()->find_type(typeName);
     if (!type) {
-        Logger::Instance().Info("  [trace] type not found: %s", typeName);
+        ref::LogInfo("  [trace] type not found: %s", typeName);
         return;
     }
-    Logger::Instance().Info("  [trace] === %s fields (size=%u) ===", typeName, type->get_size());
+    ref::LogInfo("  [trace] === %s fields (size=%u) ===", typeName, type->get_size());
     for (auto f : type->get_fields()) {
         if (!f) continue;
         auto ft = f->get_type();
-        Logger::Instance().Info("  [trace]   +0x%02X %s %s%s",
+        ref::LogInfo("  [trace]   +0x%02X %s %s%s",
             f->get_offset_from_fieldptr(),
             ft ? ft->get_full_name().c_str() : "?",
             f->get_name() ? f->get_name() : "?",
@@ -76,10 +76,10 @@ static void LogTypeSurface(const char* typeName) {
     const auto& api = reframework::API::get();
     auto type = api->tdb()->find_type(typeName);
     if (!type) {
-        Logger::Instance().Info("  [trace] type not found: %s", typeName);
+        ref::LogInfo("  [trace] type not found: %s", typeName);
         return;
     }
-    Logger::Instance().Info("  [trace] === %s ===", typeName);
+    ref::LogInfo("  [trace] === %s ===", typeName);
     ref::EnumerateMethods(typeName, {});
 }
 
@@ -135,7 +135,7 @@ static bool ResolveCastSurface() {
     // allocation is not worth that risk.
     g_cast.queryType = api->tdb()->find_type("via.physics.CastRayQuery");
 
-    Logger::Instance().Info(
+    ref::LogInfo(
         "  [trace] resolved: system=%p castRay=%p setRay=%p allHits=%p numPoints=%p getPoint=%p queryType=%p",
         g_cast.physicsSystem, (void*)g_cast.castRay, (void*)g_cast.setRay,
         (void*)g_cast.enableAllHits, (void*)g_cast.numContactPoints,
@@ -144,7 +144,7 @@ static bool ResolveCastSurface() {
     g_cast.ready = g_cast.physicsSystem && g_cast.castRay && g_cast.setRay
                 && g_cast.numContactPoints && g_cast.getContactPoint && g_cast.queryType;
     if (!g_cast.ready) {
-        Logger::Instance().Error("Aim trace unavailable - the reticle falls back to projecting the aim as a "
+        ref::LogError("Aim trace unavailable - the reticle falls back to projecting the aim as a "
             "direction, which is correct at long range and drifts under a lean at close range");
     }
     return g_cast.ready;
@@ -292,7 +292,7 @@ bool TryGetAimDistance(const float origin[3], const float forward[3], float& out
         // either the wall being aimed at or the player's own body, and the
         // parallax is lean/distance, so mistaking one for the other scales the
         // whole correction wrong.
-        Logger::Instance().Info("Aim trace: hit=%.2fm points=%u on \"%s\"",
+        ref::LogInfo("Aim trace: hit=%.2fm points=%u on \"%s\"",
             hit, countRet.dword, hitName);
     }
 
@@ -303,15 +303,15 @@ bool TryGetAimDistance(const float origin[3], const float forward[3], float& out
 void InitAimTrace() {
     const auto& api = reframework::API::get();
 
-    Logger::Instance().Info("=== AIM TRACE DISCOVERY ===");
+    ref::LogInfo("=== AIM TRACE DISCOVERY ===");
 
     // The ray-cast entry point. In RE Engine this is a native singleton, so it
     // is fetched by name rather than constructed.
     void* physicsSystem = api->get_native_singleton("via.physics.System");
-    Logger::Instance().Info("  [trace] via.physics.System native singleton = %p", physicsSystem);
+    ref::LogInfo("  [trace] via.physics.System native singleton = %p", physicsSystem);
 
     auto sysType = api->tdb()->find_type("via.physics.System");
-    Logger::Instance().Info("  [trace] via.physics.System type = %p", (void*)sysType);
+    ref::LogInfo("  [trace] via.physics.System type = %p", (void*)sysType);
 
     // Anything cast-shaped, whatever it happens to be called in this title.
     ref::EnumerateMethods("via.physics.System", { "ast", "ay", "verlap", "ntersect" });
@@ -340,7 +340,7 @@ void InitAimTrace() {
 
     ResolveCastSurface();
 
-    Logger::Instance().Info("=== END AIM TRACE DISCOVERY ===");
+    ref::LogInfo("=== END AIM TRACE DISCOVERY ===");
 }
 
 } // namespace RE9HT

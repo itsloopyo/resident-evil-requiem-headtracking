@@ -2,30 +2,53 @@
 
 #include <reframework/API.hpp>
 
-#include "core/mod.h"
-#include "core/logger.h"
-#include "camera/camera_hook.h"
+#include "camera/crosshair.h"
+#include "camera/game_state_detector.h"
 #include "camera/gui_compensation.h"
+#include "core/config.h"
 
-#include <cameraunlock/input/chord_hotkeys.h>
-#include <cameraunlock/input/hotkey_poller.h>
-#include <cameraunlock/reframework/game_window.h>
-#include <cameraunlock/reframework/log_callback.h>
+#include <cameraunlock/reframework/gameplay_gate.h>
+#include <cameraunlock/reframework/plugin_bootstrap.h>
 
-static cameraunlock::input::HotkeyPoller g_hotkeyPoller;
+namespace ref = cameraunlock::reframework;
 
-static void OnPreBeginRendering() {
-    cameraunlock::reframework::CenterGameWindowOnce();
-    RE9HT::OnPreBeginRendering();
-}
+namespace {
 
-static void OnPostBeginRendering() {
-    RE9HT::OnPostBeginRendering();
-}
+const char* const kControllerCandidateTypes[] = {
+    "requiem.PlayerCameraController",
+    "requiem.camera.PlayerCameraController",
+    "app.PlayerCameraController",
+    "app.camera.PlayerCameraController",
+};
 
-static bool OnPreGuiDrawElement(void* element, void* context) {
-    return RE9HT::OnPreGuiDrawElement(element, context);
-}
+// Requiem places its reticle from the projection matrix rather than from the
+// shared aim tangents, and measures the aim range with a physics cast rather
+// than assuming one, so the pipeline's aim projection is left off and the
+// crosshair hook owns it.
+const ref::PluginBootstrapDescriptor kPlugin = [] {
+    ref::PluginBootstrapDescriptor d;
+    d.logTag = "RE9HT";
+    d.mod.displayName = RE9HT::RE9HT_PLUGIN_NAME;
+    d.mod.version = RE9HT::RE9HT_VERSION;
+    d.mod.config = RE9HT::kConfigSchema;
+    d.camera.controllerCandidateTypes = kControllerCandidateTypes;
+    d.camera.controllerCandidateCount =
+        static_cast<int>(std::size(kControllerCandidateTypes));
+    // The player camera controller has not matched a type on this game in any
+    // captured log, and the hooker's parent-chain walk logs every component it
+    // sees on each attempt. Retrying on a cooldown bounds that logging without
+    // capping discovery, so a rig rebuilt late in a session is still caught.
+    d.camera.hookRetryCooldownFrames = 120;
+    d.camera.gate = RE9HT::GameplayGateInstance();
+    d.camera.onInit = &RE9HT::InitCrosshairProjection;
+    d.camera.onFrameApplied = &RE9HT::OnFrameApplied;
+    d.camera.onPostRestore = &RE9HT::OnPostRestore;
+    d.preGuiDrawElement = &RE9HT::OnPreGuiDrawElement;
+    d.centerGameWindow = true;
+    return d;
+}();
+
+} // namespace
 
 // --- REFramework plugin exports ---
 
@@ -40,75 +63,5 @@ void reframework_plugin_required_version(REFrameworkPluginVersion* version) {
 extern "C" __declspec(dllexport)
 bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param) {
     if (!param) return false;
-
-    // Initialize REFramework SDK wrapper
-    reframework::API::initialize(param);
-
-    // Set up logging via REFramework's log functions
-    RE9HT::Logger::Instance().SetREFunctions(
-        param->functions->log_info,
-        param->functions->log_warn,
-        param->functions->log_error
-    );
-
-    // Bridge shared library logging to REFramework's log functions
-    cameraunlock::reframework::SetLogCallback([](cameraunlock::reframework::LogLevel level, const char* msg) {
-        switch (level) {
-            case cameraunlock::reframework::LogLevel::Warning:
-                RE9HT::Logger::Instance().Warning("%s", msg); break;
-            case cameraunlock::reframework::LogLevel::Error:
-                RE9HT::Logger::Instance().Error("%s", msg); break;
-            default:
-                RE9HT::Logger::Instance().Info("%s", msg); break;
-        }
-    });
-
-    RE9HT::Logger::Instance().Info("RE9 Head Tracking v%s - Plugin loaded", RE9HT::RE9HT_VERSION);
-
-    // Initialize mod (tracking pipeline, UDP receiver)
-    if (!RE9HT::Mod::Instance().Initialize()) {
-        RE9HT::Logger::Instance().Error("Mod initialization failed");
-        return false;
-    }
-
-    param->functions->on_pre_application_entry("BeginRendering", OnPreBeginRendering);
-    param->functions->on_post_application_entry("BeginRendering", OnPostBeginRendering);
-    // Per-element access, which is what the reticle and marker compensation
-    // hang off. Cursor-based tracking suppression is disabled in
-    // game_state_detector, so the earlier cursor-flicker interaction no longer
-    // affects tracking.
-    param->functions->on_pre_gui_draw_element(OnPreGuiDrawElement);
-
-    // Set up hotkeys
-    auto& config = RE9HT::Mod::Instance().GetConfig();
-    using cameraunlock::input::NavGuarded;
-    using cameraunlock::input::ChordGuarded;
-
-    // Nav-cluster bindings. Suppressed when Ctrl+Shift is held so the chord
-    // path (below) is the sole trigger for Ctrl+Shift+<nav> combos.
-    g_hotkeyPoller.SetToggleKey(config.toggleKey, NavGuarded([]() {
-        RE9HT::Mod::Instance().Toggle();
-    }));
-    g_hotkeyPoller.AddHotkey(config.positionToggleKey, NavGuarded([]() {
-        RE9HT::Mod::Instance().RequestCycleTrackingMode();
-    }));
-    g_hotkeyPoller.AddHotkey(config.yawModeKey, NavGuarded([]() {
-        RE9HT::Mod::Instance().ToggleYawMode();
-    }));
-
-    // Ctrl+Shift+<letter> chord bindings (CLAUDE.md T/Y/U/G/H/J cluster).
-    g_hotkeyPoller.AddHotkey('Y', ChordGuarded([]() {
-        RE9HT::Mod::Instance().Toggle();
-    }));
-    g_hotkeyPoller.AddHotkey('G', ChordGuarded([]() {
-        RE9HT::Mod::Instance().RequestCycleTrackingMode();
-    }));
-    g_hotkeyPoller.AddHotkey('H', ChordGuarded([]() {
-        RE9HT::Mod::Instance().ToggleYawMode();
-    }));
-
-    g_hotkeyPoller.Start();
-
-    RE9HT::Logger::Instance().Info("Plugin initialization complete");
-    return true;
+    return ref::InitializePlugin(param, kPlugin);
 }

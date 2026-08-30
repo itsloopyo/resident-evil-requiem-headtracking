@@ -1,53 +1,22 @@
 #pragma once
 
-#include <cstdint>
+#include <cameraunlock/reframework/plugin_config.h>
 
 namespace RE9HT {
 
-struct Config {
-    // Network
-    uint16_t udpPort = DEFAULT_UDP_PORT;
+using Config = cameraunlock::reframework::PluginConfig;
 
-    // Sensitivity
-    float yawMultiplier = 1.0f;
-    float pitchMultiplier = 1.0f;
-    float rollMultiplier = 1.0f;
-
-    // Smoothing. Selected per connection from the packet source address: a
-    // tracker on this machine (loopback) uses localSmoothing, a remote network
-    // device uses remoteSmoothing. Both cover rotation and position.
-    float localSmoothing = 0.0f;
-    float remoteSmoothing = 0.15f;
-
-    // Hotkeys (Virtual Key codes)
-    int toggleKey = DEFAULT_TOGGLE_KEY;
-    int positionToggleKey = DEFAULT_POSITION_TOGGLE_KEY;
-    int yawModeKey = DEFAULT_YAW_MODE_KEY;
-
-    // Position (6DOF)
-    float positionSensitivityX = 1.0f;
-    float positionSensitivityY = 1.0f;
-    float positionSensitivityZ = 1.0f;
-    float positionLimitX = 0.30f;
-    float positionLimitY = 0.20f;
-    float positionLimitZ = 0.40f;
-    float positionLimitZBack = 0.10f;
-    bool positionEnabled = true;
-
-    // Flashlight. The beam is rotated by the head pose scaled by
-    // flashlightMultiplier, so it leads the view instead of matching it. This
-    // is a game-specific light-to-view relationship, not tracker pose shaping.
-    bool flashlightTracking = true;
-    float flashlightMultiplier = 1.5f;
-
-    // General
-    bool autoEnable = true;
-    bool worldSpaceYaw = true;
-
-    bool Load(const char* path);
-    bool Save(const char* path) const;
-    void SetDefaults();
-    void Validate();
+// Requiem's INI schema: the [Flashlight] section, and no [Position] Invert
+// keys. The axis conversion is fixed at the camera boundary here - the tracker
+// owns pose shaping, a mod converts conventions once, and a user must not be
+// able to undo it. The keys were removed after one INI edit reversed the
+// lateral lean, which reads as working until the reticle has to agree with it.
+inline constexpr cameraunlock::reframework::PluginConfigSchema kConfigSchema{
+    /*title*/ "RE9 Head Tracking",
+    /*positionInvertKeys*/ false,
+    /*flashlight*/ true,
+    /*diagnosticMarkerKey*/ false,
+    /*positionSensitivity*/ 1.0f,
 };
 
 } // namespace RE9HT

@@ -1,13 +1,8 @@
 #pragma once
 
+#include <cameraunlock/reframework/re_math.h>
+
 namespace RE9HT {
-
-// Called from plugin_main's pre-BeginRendering callback
-void OnPreBeginRendering();
-
-// Called from plugin_main's post-BeginRendering callback — restores clean matrix
-// so game logic (aim, raycasts, physics) never sees head-tracked state.
-void OnPostBeginRendering();
 
 // Where the shot lands, in normalised device coordinates of the drawn frame.
 //
@@ -37,23 +32,16 @@ struct CrosshairProjection {
 
 const CrosshairProjection& GetCrosshairProjection();
 
-// Rotation-only tangents for world-anchored GUI markers. They must NOT carry
-// the reticle's lean term: a marker is at its own depth, and parallax is
-// lean/depth, so the reticle's value is right for a marker sitting on the
-// crosshair and wrong for every other one - badly wrong for a distant marker
-// while the player aims at a near wall. A single container transform moves all
-// the markers together and so cannot express a per-depth term at all.
-//
-// What this leaves uncorrected is the markers' own parallax, since the engine
-// now projects them from the clean eye while the frame is drawn from the leaned
-// one. That error is lean/depth, which fades with distance - and markers are
-// mostly distant.
-struct MarkerProjection {
-    float tanRight = 0.0f;
-    float tanUp = 0.0f;
-    bool valid = false;
-};
+// Resolve the projection-matrix getter and the game-specific subsystems.
+// Called once from the camera pipeline's init hook.
+void InitCrosshairProjection();
 
-const MarkerProjection& GetMarkerProjection();
+// Update the crosshair projection and drive the flashlight. Called from the
+// camera pipeline once head tracking has been applied for the frame.
+void OnFrameApplied(const cameraunlock::reframework::Matrix4x4f& clean,
+                    const cameraunlock::reframework::Matrix4x4f& head);
+
+// Put the flashlight beam back before the pipeline restores the clean camera.
+void OnPostRestore();
 
 } // namespace RE9HT
