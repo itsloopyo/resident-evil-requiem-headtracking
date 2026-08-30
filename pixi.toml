@@ -6,6 +6,7 @@ channels = ["conda-forge"]
 platforms = ["win-64"]
 
 [tasks]
+sync = "git submodule update --remote cameraunlock-core"
 # Setup CMake build (x64)
 # No -G: let CMake auto-detect the installed Visual Studio generator. Pinning
 # "Visual Studio 17 2022" broke on CI once the windows runner image moved to
