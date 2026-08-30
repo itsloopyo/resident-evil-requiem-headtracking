@@ -1,7 +1,10 @@
 #pragma once
 
 #include "config.h"
+#include <atomic>
+#include <cameraunlock/input/deferred_actions.h>
 #include <cameraunlock/protocol/udp_receiver.h>
+#include <cameraunlock/time/frame_clock.h>
 #include <cameraunlock/tracking/head_tracking_session.h>
 #include <string>
 
@@ -20,6 +23,14 @@ public:
 
     void CycleTrackingMode();
     void ToggleYawMode();
+
+    // Hotkey callbacks fire on the HotkeyPoller's background thread, but
+    // CycleTrackingMode mutates the session's non-atomic
+    // processor/interpolator smoothing state owned by the render thread. The
+    // hotkey thread only requests the action; ProcessDeferredActions() runs it
+    // on the render thread at the start of each frame.
+    void RequestCycleTrackingMode() { m_cycleModeRequested.Request(); }
+    void ProcessDeferredActions();
 
     Config& GetConfig() { return m_config; }
     const Config& GetConfig() const { return m_config; }
@@ -42,7 +53,7 @@ public:
     bool GetPositionOffset(float& x, float& y, float& z);
     bool IsPositionEnabled() const { return m_session.IsPositionActive(); }
     bool IsRotationEnabled() const { return m_session.IsRotationActive(); }
-    bool IsWorldSpaceYaw() const { return m_worldSpaceYaw; }
+    bool IsWorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
     float GetLastDeltaTime() const { return m_lastDeltaTime; }
 
     Mod(const Mod&) = delete;
@@ -60,11 +71,15 @@ private:
     Config m_config;
     cameraunlock::UdpReceiver m_udpReceiver;
     cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver> m_session{m_udpReceiver};
-    bool m_worldSpaceYaw = false;
+
+    // Read on the render thread, toggled on the hotkey thread.
+    std::atomic<bool> m_worldSpaceYaw{false};
+
+    cameraunlock::input::DeferredAction m_cycleModeRequested;
 
     bool m_loggedFirstPose = false;
 
-    uint64_t m_lastFrameTickTime = 0;
+    cameraunlock::time::FrameClock m_frameClock;
     float m_lastDeltaTime = 0.016f;
 
     std::string m_pluginDir;

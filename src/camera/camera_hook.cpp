@@ -13,13 +13,12 @@
 #include <cameraunlock/reframework/camera_controller_hook.h>
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/reframework/re_math.h>
+#include <cameraunlock/time/qpc_clock.h>
 #include <reframework/API.hpp>
 
 namespace RE9HT {
 
 namespace ref = cameraunlock::reframework;
-
-constexpr float kDegToRadLocal = 0.0174532925f;
 
 // --- Shared per-frame state (extern-declared in camera_internal.h) ---
 
@@ -59,32 +58,6 @@ static void* GetCameraTransformCached() {
 
 // --- Core head tracking application ---
 
-// Where the aim points, as view tangents in the drawn frame.
-//
-// The reticle marks the clean aim DIRECTION projected through the head-rotated
-// view. It deliberately carries no lean parallax.
-//
-// Marking the aim POINT is more correct on paper: the shot lands at
-// clean.pos + distance * clean.forward and stays there however the head leans,
-// so from an eye that has moved sideways the impact is no longer straight
-// ahead, and a reticle that ignores that sits off the hole by lean/distance.
-// That version was built, and its every ingredient was verified except one -
-// the sign of the vertical lean term. Head pitch and head rise share a single
-// formula, so they cannot need opposite signs, yet in game one was right only
-// when the other was wrong, and the contradiction was never resolved. The
-// distance came from a raycast that guessed which surface a bullet stops on,
-// which took three attempts to stop measuring level-streaming volumes.
-//
-// So the parallax is out. What it leaves uncorrected is lean/distance, which is
-// bounded and shrinks with range: at the leans this game's limits allow, a few
-// degrees at conversational distance and under one at the far end of a room. It
-// is never large, never depends on a sign nobody could pin down, and it cannot
-// fly off. Every remaining term - the rotation, the canvas mapping, the
-// projection scale - is confirmed against the engine's own matrices.
-//
-// Bringing parallax back needs the vertical sign settled by measurement rather
-// than by flipping it in front of a player, and a distance that is known to be
-// the surface the shot stops on rather than inferred from a collision layer.
 // The lean parallax: the difference between projecting the impact point and
 // projecting the aim direction, through the head-tracked view.
 //
@@ -208,26 +181,38 @@ static ref::CameraControllerHooker g_controllerHooker{
     CameraUpdatePostHook,
 };
 
+// Minimum gap between repeats of the camera-controller-not-found warning.
+constexpr uint64_t kHookWarnIntervalUs = 30ull * 1000000ull;
+
 // The player camera controller component only exists once gameplay starts
 // (the main menu camera carries only render/effect controllers), so
 // discovery retries from gameplay frames instead of latching at init.
-// Attempts are spaced out and capped to bound the per-attempt component
-// logging the parent-chain walk produces.
+//
+// Retried for the whole session rather than capped: a cap turns a controller
+// that appears late - a save loaded twenty minutes in, a rig rebuilt after a
+// scene change - into a hook that can never install again. The attempt count
+// was capped to bound the per-attempt component logging the parent-chain walk
+// produces; the warning is throttled on wall-clock instead, which is what the
+// other five RE mods do.
 static void TryHookCameraController(void* cameraTransform) {
-    constexpr int kMaxAttempts = 5;
     constexpr int kRetryCooldownFrames = 120;
 
     if (g_controllerHooker.IsHooked()) return;
-    if (g_controllerHooker.AttemptCount() >= kMaxAttempts) return;
 
     static int s_cooldown = 0;
     if (s_cooldown-- > 0) return;
     s_cooldown = kRetryCooldownFrames;
 
-    if (!g_controllerHooker.TryHook(cameraTransform)
-        && g_controllerHooker.AttemptCount() >= kMaxAttempts) {
+    if (g_controllerHooker.TryHook(cameraTransform)) return;
+
+    int attempts = g_controllerHooker.AttemptCount();
+    uint64_t now = cameraunlock::time::QpcNowMicros();
+    static uint64_t s_lastHookWarnUs = 0;
+    if (attempts == 1 || (now - s_lastHookWarnUs) >= kHookWarnIntervalUs) {
+        s_lastHookWarnUs = now;
         Logger::Instance().Warning(
-            "Camera controller hook not found - aim decoupling relies on PostBeginRendering restore");
+            "Camera controller hook not yet found (attempt %d) - aim decoupling "
+            "relies on the PostBeginRendering restore", attempts);
     }
 }
 
@@ -276,6 +261,10 @@ void OnPreBeginRendering() {
     // AutoEnable=false, a menu, and a failed function cache, because those are
     // exactly the states a "no head tracking" report is trying to tell apart.
     Mod::Instance().LogFirstTrackerPose();
+
+    // Drain hotkey requests on the render thread so the mode cycle never
+    // mutates session state concurrently with the pipeline tick below.
+    Mod::Instance().ProcessDeferredActions();
 
     if (!InitCachedFunctions()) return;
     if (!Mod::Instance().IsEnabled()) return;
@@ -429,11 +418,11 @@ void OnPostBeginRendering() {
     __try {
         // Restore the clean camera in full - POSITION as well as rotation.
         //
-        // This is the only decoupling point the mod has: the player camera
-        // controller hook has never matched a type on this game ("Camera
-        // controller hook not found" in every log), so between here and the
-        // next frame's render the transform is whatever this line leaves. It
-        // used to leave the head-tracked position, and the game aims off that:
+        // This is the decoupling point the mod always has: the player camera
+        // controller hook has not matched a type on this game in any captured
+        // log, so between here and the next frame's render the transform is
+        // whatever this line leaves. It used to leave the head-tracked
+        // position, and the game aims off that:
         // the shot converges on the leaned eye's axis while the round leaves
         // the un-leaned body, so reticle and impact agree at exactly one range
         // and splay apart either side of it, swapping sides as the player walks

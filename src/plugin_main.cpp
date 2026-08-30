@@ -90,7 +90,7 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
         RE9HT::Mod::Instance().Toggle();
     }));
     g_hotkeyPoller.AddHotkey(config.positionToggleKey, NavGuarded([]() {
-        RE9HT::Mod::Instance().CycleTrackingMode();
+        RE9HT::Mod::Instance().RequestCycleTrackingMode();
     }));
     g_hotkeyPoller.AddHotkey(config.yawModeKey, NavGuarded([]() {
         RE9HT::Mod::Instance().ToggleYawMode();
@@ -101,7 +101,7 @@ bool reframework_plugin_initialize(const REFrameworkPluginInitializeParam* param
         RE9HT::Mod::Instance().Toggle();
     }));
     g_hotkeyPoller.AddHotkey('G', ChordGuarded([]() {
-        RE9HT::Mod::Instance().CycleTrackingMode();
+        RE9HT::Mod::Instance().RequestCycleTrackingMode();
     }));
     g_hotkeyPoller.AddHotkey('H', ChordGuarded([]() {
         RE9HT::Mod::Instance().ToggleYawMode();

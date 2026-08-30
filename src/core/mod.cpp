@@ -6,8 +6,6 @@
 #include "camera/game_state_detector.h"
 #include "camera/gui_compensation.h"
 
-#include <cameraunlock/time/qpc_clock.h>
-
 namespace RE9HT {
 
 using cameraunlock::TrackingMode;
@@ -81,10 +79,6 @@ bool Mod::Initialize() {
     // the forward range and limit_z_back restricts leaning back into the player.
     posSettings.limit_z = m_config.positionLimitZ;
     posSettings.limit_z_back = m_config.positionLimitZBack;
-    // Position smoothing lives on the settings; the processor picks between the
-    // two per connection from the flag the session feeds it.
-    posSettings.local_smoothing = m_config.localSmoothing;
-    posSettings.remote_smoothing = m_config.remoteSmoothing;
     // Protocol-to-engine axis conversion, fixed here rather than exposed.
     //
     // The tracker owns pose shaping; a mod converts conventions once, at the
@@ -101,14 +95,15 @@ bool Mod::Initialize() {
     posSettings.invert_x = false;
     posSettings.invert_y = false;
     posSettings.invert_z = false;
-    m_session.GetPositionProcessor().SetSettings(posSettings);
 
-    // Rotation smoothing. The session setter also re-writes the two values into
-    // the position settings above, so it has to run after SetSettings; the
-    // values are identical either way, which keeps rotation and position from
-    // ever drifting apart.
+    // Smoothing first, then the settings. The session owns the smoothing pair
+    // for both rotation and position, and SetPositionSettings stamps the owned
+    // pair over whatever the struct carries - so the struct deliberately leaves
+    // local_smoothing / remote_smoothing at their defaults and the two can
+    // never drift apart.
     m_session.SetLocalSmoothing(m_config.localSmoothing);
     m_session.SetRemoteSmoothing(m_config.remoteSmoothing);
+    m_session.SetPositionSettings(posSettings);
 
     // The previous per-mod pipeline never engaged tracker pivot compensation
     // (it passed radians to a degrees API, zeroing the artifact). Keep that
@@ -191,20 +186,16 @@ void Mod::CycleTrackingMode() {
     }
 }
 
+void Mod::ProcessDeferredActions() {
+    if (!m_initialized.load()) return;
+    if (m_cycleModeRequested.Consume()) CycleTrackingMode();
+}
+
 void Mod::TickFrame() {
     if (!m_initialized.load()) return;
 
-    uint64_t now = cameraunlock::time::QpcNowMicros();
-    float deltaTime = 0.016f;
-    if (m_lastFrameTickTime > 0) {
-        deltaTime = (now - m_lastFrameTickTime) / 1000000.0f;
-        if (deltaTime > 0.1f) deltaTime = 0.1f;
-        if (deltaTime < 0.0001f) deltaTime = 0.0001f;
-    }
-    m_lastFrameTickTime = now;
-    m_lastDeltaTime = deltaTime;
-
-    if (!m_session.Update(deltaTime)) return;
+    m_lastDeltaTime = m_frameClock.Tick();
+    m_session.Update(m_lastDeltaTime);
 }
 
 void Mod::LogFirstTrackerPose() {
@@ -229,8 +220,9 @@ bool Mod::GetPositionOffset(float& x, float& y, float& z) {
 }
 
 void Mod::ToggleYawMode() {
-    m_worldSpaceYaw = !m_worldSpaceYaw;
-    Logger::Instance().Info("Yaw mode: %s", m_worldSpaceYaw ? "world-space (horizon-locked)" : "camera-local");
+    bool now = !m_worldSpaceYaw.load(std::memory_order_relaxed);
+    m_worldSpaceYaw.store(now, std::memory_order_relaxed);
+    Logger::Instance().Info("Yaw mode: %s", now ? "world-space (horizon-locked)" : "camera-local");
 }
 
 } // namespace RE9HT
