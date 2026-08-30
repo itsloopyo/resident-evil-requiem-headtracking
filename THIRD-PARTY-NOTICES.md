@@ -13,7 +13,7 @@ Resident Evil Requiem.
 |-----------|---------|---------|--------------|
 | REFramework | nightly-01394-ec6c81fd39831b328027ae00e102bc9c9c3f8aa5 | MIT | Bundled verbatim in the installer ZIP |
 | REFramework plugin SDK headers | plugin API 1.15.0 | MIT | Redistributed verbatim as source in this repository |
-| cameraunlock-core | 26524079f20d0b25d69bbd5b28b1e9990724a57b | MIT | Compiled into `RE9HeadTracking.dll` |
+| cameraunlock-core | 67a82e334bcf32979d17965eab4b0f37a48a6ad0 | MIT | Compiled into `RE9HeadTracking.dll` |
 | OpenTrack | n/a | ISC | Not bundled; UDP protocol interoperability only |
 
 ---
@@ -72,7 +72,7 @@ SOFTWARE.
 Git submodule at `cameraunlock-core/`, compiled into `RE9HeadTracking.dll`. Our own code,
 MIT licensed, reproduced here so the notices are complete.
 
-- Pinned commit: `26524079f20d0b25d69bbd5b28b1e9990724a57b`
+- Pinned commit: `67a82e334bcf32979d17965eab4b0f37a48a6ad0`
 
 ```
 MIT License
