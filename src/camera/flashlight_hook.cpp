@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "flashlight_hook.h"
 
+#include <cameraunlock/effects/head_follow_light.h>
 #include <cameraunlock/reframework/camera_chain.h>
 #include <cameraunlock/reframework/log_callback.h>
 #include <cameraunlock/reframework/managed_utils.h>
@@ -223,11 +224,12 @@ void ApplyFlashlightTracking() {
     if (!g_lightTransform) return;
 
     // The same composition, the same signs and the same yaw mode the camera
-    // gets, scaled by the multiplier, so the beam can never disagree with the
+    // gets, scaled by the shared lead, so the beam can never disagree with the
     // view about which way the head turned. Rotating the light about its own
     // basis is what makes the beam lead the view rather than orbit it.
-    const float k = config.flashlightMultiplier;
-    RotateLight(-yaw * ref::kDegToRad * k, pitch * ref::kDegToRad * k, roll * ref::kDegToRad * k,
+    const cameraunlock::effects::HeadEuler led =
+        cameraunlock::effects::ScaleHeadEuler({yaw, pitch, roll}, config.flashlightMultiplier);
+    RotateLight(-led.yaw * ref::kDegToRad, led.pitch * ref::kDegToRad, led.roll * ref::kDegToRad,
                 ref::PluginMod::Instance().IsWorldSpaceYaw());
     g_appliedThisFrame = true;
 }
