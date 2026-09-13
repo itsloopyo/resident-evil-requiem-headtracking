@@ -8,6 +8,7 @@ An unofficial head tracking mod for Resident Evil Requiem that moves the view wi
 
 - **Decoupled look and aim** - head tracking moves the camera; aim stays on your mouse/controller
 - **6DOF positional tracking** - lean and peek with head position
+- **Works with any OpenTrack compatible tracker** - free options available for PC, iOS and Android
 - **Flashlight follows your head** - the beam leads the view at 1.5x head rotation, so it lights what you glance at
 
 ## Requirements
@@ -17,6 +18,13 @@ An unofficial head tracking mod for Resident Evil Requiem that moves the view wi
 - Windows 10/11 (64-bit)
 
 ## Installation
+
+### Lopari
+
+Download [Lopari](https://lopari.app), choose **Resident Evil Requiem**, and click
+**Play with head tracking**.
+
+### Standalone Installer
 
 1. Download the latest release from the [Releases page](https://github.com/itsloopyo/resident-evil-requiem-headtracking/releases)
 2. Extract the ZIP anywhere
