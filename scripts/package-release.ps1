@@ -31,11 +31,6 @@ if (-not (Test-Path $dllPath)) {
     throw "RE9HeadTracking.dll not found at: $dllPath"
 }
 
-$iniPath = Join-Path $projectDir "HeadTracking.ini"
-if (-not (Test-Path $iniPath)) {
-    throw "HeadTracking.ini not found at: $iniPath"
-}
-
 $scriptsDir = Join-Path $projectDir "scripts"
 foreach ($script in @("install.cmd", "uninstall.cmd")) {
     $scriptPath = Join-Path $scriptsDir $script
@@ -65,9 +60,6 @@ New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
 Copy-Item $dllPath -Destination $pluginsDir -Force
 Write-Host "  plugins/RE9HeadTracking.dll" -ForegroundColor Green
 
-Copy-Item $iniPath -Destination $pluginsDir -Force
-Write-Host "  plugins/HeadTracking.ini" -ForegroundColor Green
-
 # Stage the vendored REFramework so install.cmd can extract it offline.
 # Vendor tree is the install-time source of truth; the build/package
 # pipeline never refreshes it - bump via `pixi run update-deps`.
@@ -89,7 +81,8 @@ foreach ($vendorFile in @("REFramework.zip", "LICENSE", "README.md")) {
 
 # Stamp launcher-manifest.json with the real release version and copy it to
 # the installer-ZIP root. This is the only file the launcher reads to ingest
-# the package; manifest.json stays the repo-internal version source.
+# the package; manifest.json stays the repo-internal version source. No config
+# is shipped in either ZIP: the mod creates CameraUnlock.ini at first launch.
 $manifestSource = Join-Path $projectDir "launcher-manifest.json"
 if (-not (Test-Path $manifestSource)) {
     throw "launcher-manifest.json not found at repo root ($manifestSource)"
@@ -147,9 +140,6 @@ New-Item -ItemType Directory -Path $nexusPluginsDir -Force | Out-Null
 
 Copy-Item $dllPath -Destination $nexusPluginsDir -Force
 Write-Host "  reframework/plugins/RE9HeadTracking.dll" -ForegroundColor Green
-
-Copy-Item $iniPath -Destination $nexusPluginsDir -Force
-Write-Host "  reframework/plugins/HeadTracking.ini" -ForegroundColor Green
 
 $nexusZipName = "RE9HeadTracking-v$version-nexus.zip"
 $nexusZipPath = Join-Path $releaseDir $nexusZipName

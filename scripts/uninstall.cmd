@@ -8,7 +8,7 @@
 :: --- CONFIG BLOCK ---
 set "GAME_ID=resident-evil-requiem"
 set "MOD_DISPLAY_NAME=RE9 Head Tracking"
-set "MOD_DLLS=RE9HeadTracking.dll HeadTracking.ini"
+set "MOD_DLLS=RE9HeadTracking.dll"
 set "MOD_INTERNAL_NAME=RE9HeadTracking"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=REFramework"
@@ -20,7 +20,7 @@ set "MOD_SEED_FILES="
 :: reinstall: paths relative to the game folder, quoted when one holds a space.
 :: Keep the line when it is blank, or the list another mod's uninstall.cmd set
 :: in the same console is used instead.
-set "PRESERVE_FILES="
+set "PRESERVE_FILES=reframework\plugins\CameraUnlock.ini reframework\plugins\HeadTracking.ini"
 
 set "MANAGED_SUBFOLDER="
 set "ASSEMBLY_DLL="

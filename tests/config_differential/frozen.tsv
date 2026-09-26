@@ -1,0 +1,42 @@
+# The config differential test's record: the newest published build, the oracle copied from it,
+# the core sources the oracle compiles, and the inputs. check-frozen.ps1 fails when a working-tree
+# path below stops matching its hash. Rows naming <commit>:<path> are provenance, the blobs the
+# oracle came from, and are not checked.
+#
+# Published builds: v0.1.0 to v0.4.0 of this repo, and v0.1.0 and v0.1.1 of its predecessor
+# itsloopyo/resident-evil-requiem-headtracking-dev. The newest, v0.4.0 (cameraunlock-core
+# 8eb0121), is the oracle. The import is core's PluginConfigLegacyImport over PluginConfig::Read,
+# which core keeps frozen and pins in its own tests; the differential test compiles it at the
+# current pin on every run, so it is not recorded here.
+#
+# path	sha256	what
+tests/config_differential/oracle/src/pch.h	f0b63d584cdcea6f025331418f18eed5cc55a9ba09eefa8d9727cc5277aa92c9	the oracle; v0.4.0:src/pch.h byte for byte
+tests/config_differential/oracle/src/core/config.h	66a9a50e02a3785e1fc15c31ae7be94bf9a82aa7e5ddff02745cb341d8604e88	the oracle; v0.4.0:src/core/config.h byte for byte
+tests/config_differential/oracle/src/core/config.cpp	62fab784c4d3973a6a338571327bea6b2e0415e6154d3c0ffb44d0bbfc15a9cd	the oracle; v0.4.0:src/core/config.cpp byte for byte
+tests/config_differential/oracle/src/core/constants.h	f6e3d4e191d529063a1263e0c179352f9afe3f0577725f7d1a15557591302930	the oracle; v0.4.0:src/core/constants.h byte for byte
+tests/config_differential/oracle/src/core/logger.h	939f32bf71c5acb5eaef3adc1f7c01dd2c3634b046a97bf010dc0c8645179c76	the oracle; v0.4.0:src/core/logger.h byte for byte
+tests/config_differential/oracle/src/core/logger.cpp	9503796e853d9e7822655c9780fa293805c0a0c704227e1b7e7976f75f8f9618	the oracle; v0.4.0:src/core/logger.cpp byte for byte
+cameraunlock-core/cpp/include/cameraunlock/config/ini_reader.h	a7ffb44210ff59672fa97e8e5feaa2cb3e81938fcc0334a384c68bc371b3857a	compiled by the oracle and the import; the same bytes at 8eb0121
+cameraunlock-core/cpp/src/config/ini_reader.cpp	e01515c2656aaf533bae4350dc45b702c3e3d4043935743dcc9bd5ea581fbe1c	compiled by the oracle and the import; the same bytes at 8eb0121
+cameraunlock-core/cpp/include/cameraunlock/math/finite_utils.h	c59772d698d54ade3374ee1221b74f5563a86d76f0eb34a989ef7efab389c0ad	the oracle's SanitizeFinite; the same bytes at 8eb0121
+cameraunlock-core/cpp/include/cameraunlock/protocol/port_utils.h	91bff564d5e279b66527ec5553afcf4d591812dab0e78f71a48ef412e4db7a44	the oracle's NormalizeUdpPort; the same bytes at 8eb0121
+tests/config_differential/inputs/shipped-v0.4.0.ini	ce07a317f9a6146c52c459915a7073ac68492d8d1d74b7ead1a9afe5a155b34d	v0.4.0's installer and Nexus ZIPs' HeadTracking.ini; v0.4.0:HeadTracking.ini
+tests/config_differential/inputs/shipped-v0.3.0.ini	47aca1a37ba9064749627d3a7883610db52c8260ab569eacac27f512ba218cac	v0.3.0's installer and Nexus ZIPs' HeadTracking.ini; v0.3.0:HeadTracking.ini
+tests/config_differential/inputs/shipped-v0.1.0.ini	3e8d5038ff83fd57d5e5f0a203b7af0cf3c2e68baf4db72cde2ec042eec4a21a	the installer and Nexus ZIPs' HeadTracking.ini of v0.1.0 to v0.2.2 and of the predecessor's v0.1.0 and v0.1.1, and v0.2.2's launcher seed; v0.1.0:HeadTracking.ini
+tests/config_differential/inputs/seed-v0.3.0.ini	9ae8edfb101f6fbe594d4453a4b810b02ac9427c8bc02d0b2a61061cbf70261a	the reframework/plugins/HeadTracking.ini seed of v0.3.0's and v0.4.0's launcher-manifest.json, decoded
+tests/config_differential/inputs/committed-8c2b5ee.ini	93567d4e5e2a678f03bb37361fdc67f35fe704cf65d3aaf30753db33e751ab92	8c2b5ee:HeadTracking.ini, a version committed between v0.3.0 and v0.4.0
+tests/config_differential/inputs/committed-ac56a9e.ini	a9087e20b62564bcba74ff3bd21aa5dd64c2ba460b39f0ecf7c3d4dc665cb7f2	ac56a9e:HeadTracking.ini, a version committed between v0.3.0 and v0.4.0
+tests/config_differential/inputs/first-run-v0.4.0.ini	dd8b1a035b9d6485be47a6c9626c114275c3b8f7921153ea739eb8b3b0189bfd	the first-run output of v0.4.0, Config::SetDefaults then Config::Save as v0.4.0:src/core/config.cpp writes it, extracted once
+tests/config_differential/inputs/first-run-v0.3.0.ini	5fe561f93f6b9712115f0d1249d0ec6b68ca7fcd155f33d174fcf06694f00b9b	the first-run output of v0.3.0, Config::SetDefaults then Config::Save as v0.3.0:src/core/config.cpp writes it, extracted once
+tests/config_differential/inputs/first-run-v0.2.2.ini	f4dd26c0d16c82122c93538f56ca560bc5c24bb32aa5951910b102b3e250f933	the first-run output of v0.2.2, Config::SetDefaults then Config::Save as v0.2.2:src/core/config.cpp writes it, extracted once
+tests/config_differential/inputs/first-run-v0.1.0.ini	133e3ba05b9711ede6a4ab9f9c04e849f1200f81a704b7ec63ad16e854cd4aa1	the first-run output of v0.1.0, Config::SetDefaults then Config::Save as v0.1.0:src/core/config.cpp writes it, extracted once
+tests/config_differential/inputs/first-run-dev.ini	cc0031e715f5ee5b3febdea0b2a85ae7ef3c6348f21b23063b44fff8740f09c7	the first-run output of the predecessor's v0.1.0 and v0.1.1, extracted once from its src/core/config.cpp
+v0.4.0:src/pch.h	f0b63d584cdcea6f025331418f18eed5cc55a9ba09eefa8d9727cc5277aa92c9	oracle source
+v0.4.0:src/core/config.h	66a9a50e02a3785e1fc15c31ae7be94bf9a82aa7e5ddff02745cb341d8604e88	oracle source
+v0.4.0:src/core/config.cpp	62fab784c4d3973a6a338571327bea6b2e0415e6154d3c0ffb44d0bbfc15a9cd	oracle source
+v0.4.0:src/core/constants.h	f6e3d4e191d529063a1263e0c179352f9afe3f0577725f7d1a15557591302930	oracle source
+v0.4.0:src/core/logger.h	939f32bf71c5acb5eaef3adc1f7c01dd2c3634b046a97bf010dc0c8645179c76	oracle source
+v0.4.0:src/core/logger.cpp	9503796e853d9e7822655c9780fa293805c0a0c704227e1b7e7976f75f8f9618	oracle source
+v0.4.0:src/core/mod.cpp	cce578c97176b670e726c22f115b158d78a51f663a3a206fa6f5bc303c48d3f7	the published startup code the test models (Mod::Initialize, Mod::LoadConfig)
+v0.4.0:src/plugin_main.cpp	defbbfb9e8adb3ffef9e1daff2987100af808e171c4c71ca4677c3478f127666	the published hotkey registration the test models
+v0.4.0:HeadTracking.ini	ce07a317f9a6146c52c459915a7073ac68492d8d1d74b7ead1a9afe5a155b34d	the shipped file's blob

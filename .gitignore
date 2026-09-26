@@ -1,5 +1,6 @@
 bin/
 build/
+build-tests/
 obj/
 release/
 .vs/
@@ -16,3 +17,6 @@ AGENTS.md
 *.dll
 *.pdb
 *.exe
+
+# Nexus Mods page copy, pasted by hand and kept out of git
+NEXUS_MODS.md
