@@ -295,3 +295,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 - [Capcom](https://www.capcom.com/) - Resident Evil Requiem
 - [praydog](https://github.com/praydog/REFramework) - REFramework
 - [OpenTrack](https://github.com/opentrack/opentrack) - Head tracking software
+
+## Disclaimer
+
+This mod is not affiliated with, endorsed by, or supported by Capcom. Use at your own risk.
