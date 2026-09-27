@@ -20,6 +20,14 @@
 // value that is not finite and refuses a hotkey code it cannot poll, so N1 and N2 never apply.
 // No default moved, so the no-file input has no difference either.
 //
+// A setting the player never changed follows Defaults.ini (owner rule of 2026-09-26). On every
+// input the import lists in follows_defaults_ini exactly the rows PluginConfig::Read read at
+// SetDefaults' value, the tracking mode as both halves. Every file a published build shipped,
+// seeded or wrote at first launch migrates to the committed file against a Defaults.ini holding
+// another value on every row, and starts with that Defaults.ini's values. The shipped file with one
+// key changed keeps the player's value on that row, written `default` only where it equals what
+// that Defaults.ini gives, and every other row follows Defaults.ini.
+//
 // Every owner reads and creates one scratch Defaults.ini, which it creates with the built-in
 // values, so an input whose values are the built-in ones migrates to `default` rows. The distinct
 // migrated files are written beside the executable under migrated\, for lint-migrated.mjs to run
@@ -38,6 +46,7 @@
 
 #include <cameraunlock/config/config_owner.h>
 #include <cameraunlock/config/defaults_file.h>
+#include <cameraunlock/config/ini_editor.h>
 #include <cameraunlock/config/legacy_import.h>
 #include <cameraunlock/config/testing/ini_mutations.h>
 #include <cameraunlock/input/key_binding_registration.h>
@@ -54,6 +63,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -601,6 +611,96 @@ int CheckPoseShaping(const std::string& name, const Config& r, const cfg::Import
     return dropped;
 }
 
+// ---------------------------------------------------------------------------
+// The rows that follow Defaults.ini
+// ---------------------------------------------------------------------------
+
+using FieldsSame = std::function<bool(const Config&, const Config&)>;
+
+template <class T>
+FieldsSame Same(T Config::*field) {
+    return [field](const Config& a, const Config& b) {
+        if constexpr (std::is_same_v<T, float>) {
+            return Bits(a.*field) == Bits(b.*field);
+        } else {
+            return a.*field == b.*field;
+        }
+    };
+}
+
+// Every row of the table, the legacy key it is imported from with a valid value other than the
+// shipped one, its field as PluginConfig::Read reads it (a hotkey as its code), and its field in
+// the table (a hotkey as its list).
+struct FollowRow {
+    const char* concept_name;
+    const char* section;
+    const char* key;
+    const char* alternate;
+    FieldsSame legacy_same;
+    FieldsSame row_same;
+};
+
+const std::vector<FollowRow>& FollowRows() {
+    static const std::vector<FollowRow> rows = {
+        {"UdpPort", "Network", "UDPPort", "5555", Same(&Config::udpPort), Same(&Config::udpPort)},
+        {"EnableOnStartup", "General", "AutoEnable", "false", Same(&Config::autoEnable), Same(&Config::autoEnable)},
+        {"WorldSpaceYaw", "General", "WorldSpaceYaw", "false", Same(&Config::worldSpaceYaw), Same(&Config::worldSpaceYaw)},
+        {"LocalSmoothing", "Smoothing", "LocalSmoothing", "0.3", Same(&Config::localSmoothing), Same(&Config::localSmoothing)},
+        {"RemoteSmoothing", "Smoothing", "RemoteSmoothing", "0.3", Same(&Config::remoteSmoothing),
+         Same(&Config::remoteSmoothing)},
+        {"PositionEnabled", "Position", "Enabled", "false", Same(&Config::positionEnabled), Same(&Config::positionEnabled)},
+        {"PositionLimitX", "Position", "LimitX", "0.5", Same(&Config::positionLimitX), Same(&Config::positionLimitX)},
+        {"PositionLimitY", "Position", "LimitY", "0.5", Same(&Config::positionLimitY), Same(&Config::positionLimitY)},
+        {"PositionLimitZ", "Position", "LimitZ", "0.5", Same(&Config::positionLimitZ), Same(&Config::positionLimitZ)},
+        {"PositionLimitZBack", "Position", "LimitZBack", "0.5", Same(&Config::positionLimitZBack),
+         Same(&Config::positionLimitZBack)},
+        {"ToggleKey", "Hotkeys", "ToggleKey", "0x24", Same(&Config::toggleKey), Same(&Config::toggleKeyBindings)},
+        {"CycleTrackingModeKey", "Hotkeys", "PositionToggleKey", "0x2D", Same(&Config::positionToggleKey),
+         Same(&Config::cycleTrackingModeKeyBindings)},
+        {"YawModeKey", "Hotkeys", "YawModeKey", "0x2E", Same(&Config::yawModeKey), Same(&Config::yawModeKeyBindings)},
+        {"LightFollowsHead", "Flashlight", "Enabled", "false", Same(&Config::flashlightTracking),
+         Same(&Config::flashlightTracking)},
+        {"LightMultiplier", "Flashlight", "Multiplier", "2.5", Same(&Config::flashlightMultiplier),
+         Same(&Config::flashlightMultiplier)},
+    };
+    return rows;
+}
+
+// The import leaves to Defaults.ini exactly the rows PluginConfig::Read read at SetDefaults'
+// value, the tracking mode as RotationEnabled and PositionEnabled together.
+void CheckFollowsDefaultsIni(const std::string& name, const Config& read, const cfg::ImportResult& result) {
+    Config shipped;
+    shipped.SetDefaults(RE9HT::kConfigSchema);
+    std::set<std::string> expected;
+    for (const FollowRow& row : FollowRows()) {
+        if (!row.legacy_same(read, shipped)) continue;
+        expected.insert(row.concept_name);
+        if (std::strcmp(row.concept_name, "PositionEnabled") == 0) expected.insert("RotationEnabled");
+    }
+    std::set<std::string> listed;
+    for (const cfg::schema::Concept id : result.follows_defaults_ini) {
+        listed.insert(cfg::schema::kConcepts[static_cast<size_t>(id)].name);
+    }
+    if (listed != expected) {
+        std::string got;
+        for (const std::string& n : listed) got += " " + n;
+        std::string want;
+        for (const std::string& n : expected) want += " " + n;
+        Fail(name, "follows_defaults_ini is" + got + ", not" + want);
+    }
+}
+
+// The value text of the file's one `key=` line.
+std::string RowText(const std::string& file, const std::string& key) {
+    const std::string needle = "\r\n" + key + "=";
+    const size_t at = file.find(needle);
+    if (at == std::string::npos || file.find(needle, at + 1) != std::string::npos) {
+        throw std::logic_error("the migrated file does not hold exactly one " + key + " line");
+    }
+    const size_t start = at + needle.size();
+    return file.substr(start, file.find("\r\n", start) - start);
+}
+
 void CheckDropRules(const std::string& name, const cfg::ImportResult& result) {
     for (const cfg::DroppedValue& d : result.dropped) {
         if (d.rule != cfg::DropRule::PoseShaping) {
@@ -800,6 +900,7 @@ void RunInput(const std::wstring& root, const std::string& name, const std::opti
         if (bytes.has_value() != (result.status == cfg::ImportStatus::Imported)) {
             Fail(name, "the import's status does not say whether there was a file");
         }
+        CheckFollowsDefaultsIni(name, read, result);
     }
 
     CompareOracleWithImport(name, Narrow(importPath), oracleRead, o, found, read);
@@ -849,6 +950,130 @@ void TestUnopenableFile(const std::wstring& root, const std::string& shipped, co
         Fail(name, "a deferred import created a file or changed the legacy one");
     }
     RemoveFolders(f);
+}
+
+// What a new player starts with against the Defaults.ini at `defaults`.
+Config FreshStart(const std::wstring& root, const std::wstring& defaults) {
+    const Folders f = NextFolders(root);
+    cfg::ConfigOwner<Config> owner(RE9HT::testing::OwnerOptions(f.migration, cfg::DefaultsFile::At(defaults)));
+    const cfg::ConfigLoadResult<Config> loaded = owner.Load();
+    if (loaded.status != cfg::ConfigLoadStatus::Created) {
+        throw std::logic_error("a fresh start against a scratch Defaults.ini is not Created");
+    }
+    RemoveFolders(f);
+    return loaded.config;
+}
+
+// A Defaults.ini in a folder of its own, holding the built-in values but a different one on every
+// row this table has.
+std::wstring OtherDefaultsIni(const std::wstring& root) {
+    const std::wstring path = MakeFolder(root, L"global-other") + L"\\Defaults.ini";
+    FreshStart(root, path);
+    const cameraunlock::IniEditResult edited = cameraunlock::EditIni(ReadBytes(path), {
+        {"Network", "UdpPort", "4343"},
+        {"General", "EnableOnStartup", "false"},
+        {"General", "WorldSpaceYaw", "false"},
+        {"General", "RotationEnabled", "true"},
+        {"Smoothing", "LocalSmoothing", "0.25"},
+        {"Smoothing", "RemoteSmoothing", "0.45"},
+        {"Position", "PositionEnabled", "false"},
+        {"Position", "PositionLimitX", "0.35"},
+        {"Position", "PositionLimitY", "0.25"},
+        {"Position", "PositionLimitZ", "0.45"},
+        {"Position", "PositionLimitZBack", "0.15"},
+        {"Hotkeys", "ToggleKey", "F9"},
+        {"Hotkeys", "CycleTrackingModeKey", "F10"},
+        {"Hotkeys", "YawModeKey", "F11"},
+        {"Light", "LightFollowsHead", "false"},
+        {"Light", "LightMultiplier", "2.0"},
+    });
+    if (!edited.Succeeded()) throw std::logic_error("cannot edit the scratch Defaults.ini");
+    WriteBytes(path, edited.bytes);
+    return path;
+}
+
+// The owner rule of 2026-09-26, against the built-in Defaults.ini and one with another value on
+// every row: an untouched file follows Defaults.ini on every row, and a changed key keeps the
+// player's value on its row alone.
+void TestFollowsDefaultsIni(const std::wstring& root, const std::string& shipped,
+                            const std::vector<std::pair<std::string, std::optional<std::string>>>& published,
+                            const MigrationTally& tally) {
+    MigrationTally other;
+    other.defaults = OtherDefaultsIni(root);
+    const Config builtIn = FreshStart(root, tally.defaults);
+    const Config otherStart = FreshStart(root, other.defaults);
+    for (const FollowRow& row : FollowRows()) {
+        if (row.row_same(builtIn, otherStart)) {
+            Fail("follows Defaults.ini", std::string(row.concept_name) + " reads the same from both Defaults.ini files");
+        }
+    }
+
+    for (const auto& [name, bytes] : published) {
+        if (!bytes) continue;
+        const Folders f = NextFolders(root);
+        const Migration m = Migrate(name, f.migration, bytes, false, other);
+        if (m.bytes != tally.committed) {
+            Fail(name, "against another Defaults.ini, an untouched file does not migrate to the committed file");
+        }
+        for (const FollowRow& row : FollowRows()) {
+            if (!row.row_same(m.loaded.config, otherStart)) {
+                Fail(name, std::string("against another Defaults.ini, ") + row.concept_name + " does not follow it");
+            }
+        }
+        RemoveFolders(f);
+    }
+
+    const cfg::LegacyImport<Config> import = cameraunlock::reframework::PluginConfigLegacyImport(RE9HT::kConfigSchema);
+    for (const FollowRow& changed : FollowRows()) {
+        const cameraunlock::IniEditResult edited = cameraunlock::EditIni(shipped, {{changed.section, changed.key, changed.alternate}});
+        if (!edited.Succeeded()) throw std::logic_error(std::string("the shipped file has no ") + changed.key);
+        const std::string name = std::string("[") + changed.section + "] " + changed.key + "=" + changed.alternate;
+
+        const Folders f = NextFolders(root);
+        const std::wstring importPath = f.import + L"\\" + kLegacyName;
+        WriteBytes(importPath, edited.bytes);
+        Config player = cameraunlock::reframework::PluginConfigTable(RE9HT::kConfigSchema).defaults();
+        const cfg::ImportResult result = import.run(cfg::detail::OwnerLegacyInput(importPath), player);
+        if (changed.row_same(player, builtIn)) Fail(name, "the alternate value is the shipped one");
+        for (const cfg::schema::Concept id : result.follows_defaults_ini) {
+            if (std::strcmp(cfg::schema::kConcepts[static_cast<size_t>(id)].name, changed.concept_name) == 0) {
+                Fail(name, "the changed row is left to Defaults.ini");
+            }
+        }
+
+        const MigrationTally& otherRun = other;
+        for (const auto& [label, start, run] : {std::make_tuple("built-in", &builtIn, &tally),
+                                                std::make_tuple("other", &otherStart, &otherRun)}) {
+            const std::string where = name + ", " + label + " Defaults.ini";
+            const Migration m = Migrate(where, f.migration, edited.bytes, false, *run);
+            if (m.loaded.status != cfg::ConfigLoadStatus::Migrated || !m.bytes) {
+                Fail(where, "the migration is not Migrated");
+                EmptyFolder(f.migration);
+                continue;
+            }
+            for (const FollowRow& row : FollowRows()) {
+                const bool isChanged = &row == &changed;
+                const Config& want = isChanged ? player : *start;
+                if (!row.row_same(m.loaded.config, want)) {
+                    Fail(where, std::string(row.concept_name) +
+                                    (isChanged ? " does not keep the player's value" : " does not follow Defaults.ini"));
+                }
+                const bool writtenDefault = RowText(*m.bytes, row.concept_name) == "default";
+                const bool wantDefault = !isChanged || row.row_same(player, *start);
+                if (writtenDefault != wantDefault) {
+                    Fail(where, std::string(row.concept_name) + (wantDefault ? " is not written default" : " is written default"));
+                }
+            }
+            EmptyFolder(f.migration);
+        }
+        RemoveFolders(f);
+    }
+
+    std::printf("follows Defaults.ini: %zu untouched files, and %zu rows each changed alone, against two Defaults.ini files\n",
+                published.size() - 1, FollowRows().size());
+    const std::wstring global = root + L"\\global-other";
+    EmptyFolder(global);
+    RemoveDirectoryW(global.c_str());
 }
 
 // Registration compares the two builds by key and modifiers, which holds only while a binding
@@ -981,6 +1206,7 @@ int main() {
             }
             RemoveFolders(f);
         }
+        TestFollowsDefaultsIni(root, shipped, inputs, tally);
 
         const cfg::LegacyImport<Config> import = cameraunlock::reframework::PluginConfigLegacyImport(RE9HT::kConfigSchema);
         const std::vector<IniMutation> corpus = GenerateIniMutations(shipped, import.keys, CorpusKeys(import.keys));
