@@ -77,6 +77,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 
 try {
     $Version = Resolve-ReleaseVersion -Argument $Version -CurrentVersion $currentVersion
+    Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectDir -Version $Version
 } catch {
     Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
