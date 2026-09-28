@@ -134,10 +134,11 @@ head moves freely around it, so to see down the sights you have to put your head
 behind them, as you would in VR. It is hard, and it is off by default. The mod
 saves the mode you pick, so it holds the next time you start the game.
 
-Leaning carries on through the aim. As the sights come up, your arms and weapon
-move with your head, so the sights stay in front of your eye, and your rounds
-leave from where your eye is. Lean round a corner with the sights up and you can
-hit what you can see from there.
+Leaning carries on through the aim. As the sights come up, leaning sideways or
+up and down moves your arms and weapon with your head, so the sights stay in
+front of your eye, and your rounds leave from where your eye is. Lean round a
+corner with the sights up and you can hit what you can see from there. Leaning
+forward or back stays on the view and moves your eye along the sights.
 
 ## Configuration
 
