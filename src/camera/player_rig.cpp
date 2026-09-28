@@ -126,6 +126,8 @@ static void ResolvePlayer() {
     if (!arr) return;
     auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
     if (lenRet.exception_thrown || lenRet.dword == 0) {
+        // Never drop the rig with an offset still on it.
+        if (g_rig.written) RestoreRig();
         ReleaseCache();
         return;
     }
