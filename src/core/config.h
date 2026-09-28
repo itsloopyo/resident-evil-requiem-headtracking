@@ -27,6 +27,8 @@ inline constexpr cameraunlock::reframework::PluginConfigSchema kConfigSchema{
     /*positionSensitivity*/ 1.0f,
     /*modId*/ "re9",
     /*canonicalConfig*/ true,
+    /*trueFreeLook*/ true,
+    /*leanCollision*/ true,
 };
 
 } // namespace RE9HT

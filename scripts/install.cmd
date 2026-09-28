@@ -21,7 +21,7 @@ set "REFRAMEWORK_VENDOR_ZIP_NAME=REFramework.zip"
 :: whatever the user tuned. Listing an .ini in MOD_DLLS instead puts it through
 :: the unconditional copy and resets every key on every update.
 set "MOD_SEED_FILES="
-set "MOD_CONTROLS=Controls (nav-cluster keys, or Ctrl+Shift chords for keyboards without a nav cluster):&echo   End  / Ctrl+Shift+Y - Toggle head tracking&echo   PgUp / Ctrl+Shift+G - Toggle positional tracking&echo   PgDn / Ctrl+Shift+H - Toggle world/camera-local yaw"
+set "MOD_CONTROLS=Controls (nav-cluster keys, or Ctrl+Shift chords for keyboards without a nav cluster):&echo   End  / Ctrl+Shift+Y - Toggle head tracking&echo   PgUp / Ctrl+Shift+G - Toggle positional tracking&echo   PgDn / Ctrl+Shift+H - Toggle world/camera-local yaw&echo   Ins  / Ctrl+Shift+U - Toggle true free look (aiming down sights)"
 :: --- END CONFIG BLOCK ---
 
 :: Pin delayed expansion off before `%*` is expanded on the `call` below.

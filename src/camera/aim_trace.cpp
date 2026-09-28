@@ -92,6 +92,7 @@ static struct {
     reframework::API::Method* setRay = nullptr;          // setRay(via.vec3 from, via.vec3 to)
     reframework::API::Method* enableAllHits = nullptr;
     reframework::API::Method* enableNearSort = nullptr;
+    reframework::API::Method* setFilterInfo = nullptr;
     reframework::API::Method* numContactPoints = nullptr;
     reframework::API::Method* getContactPoint = nullptr;
     reframework::API::Method* getContactCollidable = nullptr;
@@ -125,6 +126,7 @@ static bool ResolveCastSurface() {
     // backs away from the wall, and the correction grows when it should shrink.
     g_cast.enableAllHits = ref::FindMethodByParamCount("via.physics.CastRayQuery", "enableAllHits", 0);
     g_cast.enableNearSort = ref::FindMethodByParamCount("via.physics.CastRayQuery", "enableNearSort", 0);
+    g_cast.setFilterInfo = ref::FindMethodByParamCount("via.physics.CastRayQuery", "set_FilterInfo", 1);
     g_cast.numContactPoints = ref::FindMethodByParamCount("via.physics.CastRayResult", "get_NumContactPoints", 0);
     g_cast.getContactPoint = ref::FindMethodByParamCount("via.physics.CastRayResult", "getContactPoint", 1);
     g_cast.getContactCollidable = ref::FindMethodByParamCount("via.physics.CastRayResult", "getContactCollidable", 1);
@@ -136,10 +138,10 @@ static bool ResolveCastSurface() {
     g_cast.queryType = api->tdb()->find_type("via.physics.CastRayQuery");
 
     ref::LogInfo(
-        "  [trace] resolved: system=%p castRay=%p setRay=%p allHits=%p numPoints=%p getPoint=%p queryType=%p",
+        "  [trace] resolved: system=%p castRay=%p setRay=%p allHits=%p numPoints=%p getPoint=%p queryType=%p setFilterInfo=%p",
         g_cast.physicsSystem, (void*)g_cast.castRay, (void*)g_cast.setRay,
         (void*)g_cast.enableAllHits, (void*)g_cast.numContactPoints,
-        (void*)g_cast.getContactPoint, (void*)g_cast.queryType);
+        (void*)g_cast.getContactPoint, (void*)g_cast.queryType, (void*)g_cast.setFilterInfo);
 
     g_cast.ready = g_cast.physicsSystem && g_cast.castRay && g_cast.setRay
                 && g_cast.numContactPoints && g_cast.getContactPoint && g_cast.queryType;
@@ -225,28 +227,28 @@ static bool IsBulletBlocking(uint32_t layer, uint32_t mask) {
     return false;
 }
 
-bool TryGetAimDistance(const float origin[3], const float forward[3], float& outMetres) {
+bool CastFirstBlocking(const float from[3], const float to[3], BlockingHit& out,
+                       reframework::API::ManagedObject* filter) {
     if (!g_cast.ready) return false;
 
     auto query = g_cast.queryType->create_instance();
     if (!query) return false;
 
     // via.vec3 is 16-byte aligned in RE Engine, so pass 4 floats.
-    alignas(16) float from[4] = {
-        origin[0] + forward[0] * kTraceStartOffset,
-        origin[1] + forward[1] * kTraceStartOffset,
-        origin[2] + forward[2] * kTraceStartOffset, 0.f };
-    alignas(16) float to[4] = {
-        origin[0] + forward[0] * kTraceRange,
-        origin[1] + forward[1] * kTraceRange,
-        origin[2] + forward[2] * kTraceRange, 0.f };
+    alignas(16) float from4[4] = { from[0], from[1], from[2], 0.f };
+    alignas(16) float to4[4] = { to[0], to[1], to[2], 0.f };
 
-    std::vector<void*> rayArgs = { (void*)&from[0], (void*)&to[0] };
+    std::vector<void*> rayArgs = { (void*)&from4[0], (void*)&to4[0] };
     auto setRet = g_cast.setRay->invoke(query, rayArgs);
     if (setRet.exception_thrown) return false;
 
     if (g_cast.enableAllHits) g_cast.enableAllHits->invoke(query, ref::EmptyArgs());
     if (g_cast.enableNearSort) g_cast.enableNearSort->invoke(query, ref::EmptyArgs());
+    if (filter) {
+        if (!g_cast.setFilterInfo) return false;
+        auto filterRet = ref::InvokeMethodWithArg(g_cast.setFilterInfo, query, filter);
+        if (filterRet.exception_thrown) return false;
+    }
 
     std::vector<void*> castArgs = { (void*)query };
     auto castRet = g_cast.castRay->invoke(
@@ -255,12 +257,14 @@ bool TryGetAimDistance(const float origin[3], const float forward[3], float& out
 
     auto result = reinterpret_cast<reframework::API::ManagedObject*>(castRet.ptr);
     auto countRet = g_cast.numContactPoints->invoke(result, ref::EmptyArgs());
-    if (countRet.exception_thrown || countRet.dword == 0) return false;
+    if (countRet.exception_thrown) return false;
+
+    out.blocked = false;
+    out.contacts = countRet.dword;
+    snprintf(out.name, sizeof(out.name), "?");
 
     // Nearest-first (enableNearSort), so the first blocking contact is the one
-    // the bullet reaches.
-    float hit = -1.f;
-    char hitName[128] = "?";
+    // the ray reaches.
     const uint32_t contacts = countRet.dword < 32 ? countRet.dword : 32;
     for (uint32_t i = 0; i < contacts; i++) {
         std::vector<void*> a = { (void*)(uintptr_t)i };
@@ -268,16 +272,38 @@ bool TryGetAimDistance(const float origin[3], const float forward[3], float& out
         if (pr.exception_thrown) continue;
         // Filter before naming: layer and mask are two reflection hops and reject
         // most contacts, where resolving the GameObject name costs three more.
-        uint32_t layer = 0, mask = 0;
-        if (!ContactFilter(result, i, layer, mask)) continue;
-        if (!IsBulletBlocking(layer, mask)) continue;
-        char nm[128];
-        ContactName(result, i, nm, sizeof(nm));
-        hit = ContactAxialDistance(reinterpret_cast<const float*>(&pr.bytes[0]), origin, forward);
-        snprintf(hitName, sizeof(hitName), "%s", nm);
+        if (!filter) {
+            uint32_t layer = 0, mask = 0;
+            if (!ContactFilter(result, i, layer, mask)) continue;
+            if (!IsBulletBlocking(layer, mask)) continue;
+        }
+        ContactName(result, i, out.name, sizeof(out.name));
+        // via.physics.ContactPoint: Position at +0x00, Normal at +0x10.
+        const float* point = reinterpret_cast<const float*>(&pr.bytes[0]);
+        for (int k = 0; k < 3; k++) {
+            out.position[k] = point[k];
+            out.normal[k] = point[4 + k];
+        }
+        out.blocked = true;
         break;
     }
-    if (hit < 0.f || !(hit > 0.1f) || !(hit < kTraceRange * 1.5f)) return false;
+    return true;
+}
+
+bool TryGetAimDistance(const float origin[3], const float forward[3], float& outMetres) {
+    const float from[3] = {
+        origin[0] + forward[0] * kTraceStartOffset,
+        origin[1] + forward[1] * kTraceStartOffset,
+        origin[2] + forward[2] * kTraceStartOffset };
+    const float to[3] = {
+        origin[0] + forward[0] * kTraceRange,
+        origin[1] + forward[1] * kTraceRange,
+        origin[2] + forward[2] * kTraceRange };
+
+    BlockingHit contact;
+    if (!CastFirstBlocking(from, to, contact, nullptr) || !contact.blocked) return false;
+    const float hit = ContactAxialDistance(contact.position, origin, forward);
+    if (!(hit > 0.1f) || !(hit < kTraceRange * 1.5f)) return false;
 
     // No smoothing. The reticle is glued to a surface, so when the aim crosses
     // an edge the impact point genuinely jumps and the reticle is supposed to
@@ -293,7 +319,7 @@ bool TryGetAimDistance(const float origin[3], const float forward[3], float& out
         // parallax is lean/distance, so mistaking one for the other scales the
         // whole correction wrong.
         ref::LogInfo("Aim trace: hit=%.2fm points=%u on \"%s\"",
-            hit, countRet.dword, hitName);
+            hit, contact.contacts, contact.name);
     }
 
     outMetres = hit;

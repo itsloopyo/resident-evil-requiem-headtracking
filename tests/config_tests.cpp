@@ -195,6 +195,46 @@ void TogglesSaveTheirRowsOnly() {
     Check(reread.config.autoEnable, "EnableOnStartup is still the default");
 }
 
+void TrueFreeLookIsOffAndItsToggleSavesOneLine() {
+    std::printf("TrueFreeLook defaults to false on Insert and Ctrl+Shift+U, and its toggle saves one line\n");
+    const Config defaults = cameraunlock::reframework::PluginConfigTable(RE9HT::kConfigSchema).defaults();
+    Check(!defaults.trueFreeLook, "TrueFreeLook defaults to false (sights locked)");
+    Check(defaults.trueFreeLookKeyBindings == "Insert, Ctrl+Shift+U", "TrueFreeLookKey is Insert, Ctrl+Shift+U");
+    Check(defaults.collisionEnabled, "CollisionEnabled defaults to true");
+    Check(defaults.collisionMargin > 0.01f, "CollisionMargin is further off a wall than the 0.01 m near clip");
+
+    const Scratch s = MakeScratch(L"free-look");
+    const std::wstring path = s.folder + L"\\" + RE9HT::testing::kConfigFileName;
+    {
+        cfg::ConfigOwner<Config> owner(Options(s));
+        owner.Load();
+    }
+    const std::string fresh = ReadBytes(path);
+
+    // The change PluginMod::ToggleTrueFreeLook saves.
+    cfg::ConfigOwner<Config> owner(Options(s));
+    owner.Load();
+    const cfg::ConfigSaveResult saved = owner.Save([](Config& c) { c.trueFreeLook = true; });
+    Check(saved.status == cfg::ConfigSaveStatus::Saved, "the free look save is Saved");
+    const std::vector<std::string> lines = ChangedLines(fresh, ReadBytes(path));
+    Check(lines.size() == 1 && lines[0] == "TrueFreeLook=true", "only TrueFreeLook=default became true");
+
+    cfg::ConfigOwner<Config> again(Options(s));
+    Check(again.Load().config.trueFreeLook, "a restart comes back in true free look");
+
+    // A file still carrying the retired cycle's key loads with free look off. The key is never
+    // read as TrueFreeLook: its tracked mode was not free look.
+    std::string withAdsMode = fresh;
+    const std::string position = "\r\n[Position]\r\n";
+    withAdsMode.insert(withAdsMode.find(position) + position.size(), "ads_mode=tracked\r\n");
+    WriteBytes(path, withAdsMode);
+    cfg::ConfigOwner<Config> old(Options(s));
+    const cfg::ConfigLoadResult<Config> loaded = old.Load();
+    Check(loaded.status == cfg::ConfigLoadStatus::Canonical, "a file carrying ads_mode still loads as canonical");
+    Check(!loaded.config.trueFreeLook, "and with free look off");
+    Check(ReadBytes(path) == withAdsMode, "and is not rewritten");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -212,6 +252,7 @@ int main(int argc, char** argv) {
         EveryHotkeyDefaultIsTheFleets();
         FirstLaunchCreatesTheCommittedFile();
         TogglesSaveTheirRowsOnly();
+        TrueFreeLookIsOffAndItsToggleSavesOneLine();
         std::filesystem::remove_all(ScratchRoot());
     } catch (const std::exception& e) {
         std::printf("FAIL: %s\n", e.what());

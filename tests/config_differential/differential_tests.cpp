@@ -666,12 +666,16 @@ const std::vector<FollowRow>& FollowRows() {
     return rows;
 }
 
+// Rows no published build had a setting for, so no legacy file can hold them.
+const char* const kNotInLegacy[] = {"TrueFreeLook", "TrueFreeLookKey", "CollisionEnabled", "CollisionReleaseSmoothing"};
+
 // The import leaves to Defaults.ini exactly the rows PluginConfig::Read read at SetDefaults'
-// value, the tracking mode as RotationEnabled and PositionEnabled together.
+// value, the tracking mode as RotationEnabled and PositionEnabled together, and every row no
+// legacy file can hold.
 void CheckFollowsDefaultsIni(const std::string& name, const Config& read, const cfg::ImportResult& result) {
     Config shipped;
     shipped.SetDefaults(RE9HT::kConfigSchema);
-    std::set<std::string> expected;
+    std::set<std::string> expected(std::begin(kNotInLegacy), std::end(kNotInLegacy));
     for (const FollowRow& row : FollowRows()) {
         if (!row.legacy_same(read, shipped)) continue;
         expected.insert(row.concept_name);

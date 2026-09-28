@@ -5,6 +5,8 @@
 #include "camera/crosshair.h"
 #include "camera/game_state_detector.h"
 #include "camera/gui_compensation.h"
+#include "camera/lean_trace.h"
+#include "camera/player_rig.h"
 #include "core/config.h"
 
 #include <cameraunlock/config/defaults_file.h>
@@ -21,6 +23,11 @@ const char* const kControllerCandidateTypes[] = {
     "app.PlayerCameraController",
     "app.camera.PlayerCameraController",
 };
+
+void OnCameraInit() {
+    RE9HT::InitCrosshairProjection();
+    RE9HT::InitPlayerRig();
+}
 
 // Requiem places its reticle from the projection matrix rather than from the
 // shared aim tangents, and measures the aim range with a physics cast rather
@@ -43,9 +50,17 @@ const ref::PluginBootstrapDescriptor kPlugin = [] {
     // capping discovery, so a rig rebuilt late in a session is still caught.
     d.camera.hookRetryCooldownFrames = 120;
     d.camera.gate = RE9HT::GameplayGateInstance();
-    d.camera.onInit = &RE9HT::InitCrosshairProjection;
+    d.camera.onInit = &OnCameraInit;
     d.camera.onFrameApplied = &RE9HT::OnFrameApplied;
     d.camera.onPostRestore = &RE9HT::OnPostRestore;
+    // The player root, cp_A100, carries the camera, the arms, the weapon and the
+    // shot's start point, so sights locked moves the lean onto it while aiming.
+    d.camera.isAiming = &RE9HT::IsAiming;
+    d.camera.rigAvailable = &RE9HT::RigAvailable;
+    d.camera.writeRig = &RE9HT::WriteRig;
+    d.camera.restoreRig = &RE9HT::RestoreRig;
+    d.camera.leanQuery = &RE9HT::lean_trace::Query;
+    d.camera.unzoomedFovDegrees = &RE9HT::UnzoomedFovDegrees;
     d.preGuiDrawElement = &RE9HT::OnPreGuiDrawElement;
     d.centerGameWindow = true;
     return d;

@@ -40,6 +40,7 @@ Write-DeploymentSuccess `
         "End       - Toggle head tracking on/off",
         "Page Up   - Toggle positional tracking",
         "Page Down - Toggle yaw mode (world / local)",
+        "Insert    - Toggle true free look (aiming down sights)",
         "",
-        "No nav cluster? Chords: Ctrl+Shift+ Y=Toggle G=Mode H=Yaw"
+        "No nav cluster? Chords: Ctrl+Shift+ Y=Toggle G=Mode H=Yaw U=Free look"
     )

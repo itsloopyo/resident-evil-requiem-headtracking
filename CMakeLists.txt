@@ -29,6 +29,8 @@ add_library(RE9HeadTracking SHARED
     src/camera/flashlight_hook.cpp
     src/camera/gui_compensation.cpp
     src/camera/game_state_detector.cpp
+    src/camera/lean_trace.cpp
+    src/camera/player_rig.cpp
 )
 
 target_precompile_headers(RE9HeadTracking PRIVATE src/pch.h)
