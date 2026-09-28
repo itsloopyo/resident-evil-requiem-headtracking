@@ -114,4 +114,5 @@ if(RE9HT_BUILD_TESTS)
     # hashes tests/config_differential/frozen.tsv records.
     add_test(NAME re9ht_config_frozen COMMAND powershell -NoProfile -ExecutionPolicy Bypass
         -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/config_differential/check-frozen.ps1)
+    set_tests_properties(re9ht_config_differential re9ht_config_lint re9ht_config_frozen PROPERTIES LABELS differential)
 endif()
