@@ -6,8 +6,8 @@
 #include <cameraunlock/reframework/tdb_inspector.h>
 
 #include <reframework/API.hpp>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace RE9HT {
 
@@ -133,8 +133,8 @@ static bool ResolveCastSurface() {
 
     // The type, not an instance. A query created once and held across frames is
     // a raw pointer to a managed object with nothing rooting it, so a GC pass is
-    // free to move or collect it out from under the next trace. At 15 Hz the
-    // allocation is not worth that risk.
+    // free to move or collect it out from under the next trace. Each cast
+    // creates its own, which also keeps a filter set by one cast off the next.
     g_cast.queryType = api->tdb()->find_type("via.physics.CastRayQuery");
 
     ref::LogInfo(
@@ -152,35 +152,47 @@ static bool ResolveCastSurface() {
     return g_cast.ready;
 }
 
-// GameObject name behind a contact, for the blocking test and the log.
+// The getters below run for every contact of every cast, so each Method* is
+// resolved once from the first object seen and invoked directly, rather than
+// through invoke("name"), which searches the type's methods by string per call.
+static reframework::API::Method* g_collidableGetGameObject = nullptr;
+static reframework::API::Method* g_collidableGetFilterInfo = nullptr;
+static reframework::API::Method* g_gameObjectGetName = nullptr;
+static reframework::API::Method* g_filterGetLayer = nullptr;
+static reframework::API::Method* g_filterGetMaskBits = nullptr;
+
+static reframework::API::ManagedObject* ContactCollidable(reframework::API::ManagedObject* result,
+                                                          uint32_t index) {
+    if (!g_cast.getContactCollidable) return nullptr;
+    void* args[1] = { (void*)(uintptr_t)index };
+    auto cr = g_cast.getContactCollidable->invoke(result, std::span<void*>(args, 1));
+    if (cr.exception_thrown) return nullptr;
+    return reinterpret_cast<reframework::API::ManagedObject*>(cr.ptr);
+}
+
+// GameObject name behind a contact, for the log.
 static void ContactName(reframework::API::ManagedObject* result, uint32_t index,
                         char* out, size_t outSize) {
     snprintf(out, outSize, "?");
-    if (!g_cast.getContactCollidable) return;
-    std::vector<void*> a = { (void*)(uintptr_t)index };
-    auto cr = g_cast.getContactCollidable->invoke(result, a);
-    if (cr.exception_thrown || !cr.ptr) return;
-    auto col = reinterpret_cast<reframework::API::ManagedObject*>(cr.ptr);
-    auto orr = col->invoke("get_GameObject", ref::EmptyArgs());
+    auto col = ContactCollidable(result, index);
+    if (!col) return;
+    auto orr = ref::InvokeCached(col, g_collidableGetGameObject, "get_GameObject", ref::EmptyArgs());
     if (orr.exception_thrown || !orr.ptr) return;
     auto ow = reinterpret_cast<reframework::API::ManagedObject*>(orr.ptr);
-    auto nr = ow->invoke("get_Name", ref::EmptyArgs());
+    auto nr = ref::InvokeCached(ow, g_gameObjectGetName, "get_Name", ref::EmptyArgs());
     if (!nr.exception_thrown && nr.ptr) ref::ReadManagedString(nr.ptr, out, outSize);
 }
 
 // The collision layer and mask behind a contact.
 static bool ContactFilter(reframework::API::ManagedObject* result, uint32_t index,
                           uint32_t& layer, uint32_t& mask) {
-    if (!g_cast.getContactCollidable) return false;
-    std::vector<void*> a = { (void*)(uintptr_t)index };
-    auto cr = g_cast.getContactCollidable->invoke(result, a);
-    if (cr.exception_thrown || !cr.ptr) return false;
-    auto col = reinterpret_cast<reframework::API::ManagedObject*>(cr.ptr);
-    auto fi = col->invoke("get_FilterInfo", ref::EmptyArgs());
+    auto col = ContactCollidable(result, index);
+    if (!col) return false;
+    auto fi = ref::InvokeCached(col, g_collidableGetFilterInfo, "get_FilterInfo", ref::EmptyArgs());
     if (fi.exception_thrown || !fi.ptr) return false;
     auto f = reinterpret_cast<reframework::API::ManagedObject*>(fi.ptr);
-    auto lr = f->invoke("get_Layer", ref::EmptyArgs());
-    auto mr = f->invoke("get_MaskBits", ref::EmptyArgs());
+    auto lr = ref::InvokeCached(f, g_filterGetLayer, "get_Layer", ref::EmptyArgs());
+    auto mr = ref::InvokeCached(f, g_filterGetMaskBits, "get_MaskBits", ref::EmptyArgs());
     if (lr.exception_thrown || mr.exception_thrown) return false;
     layer = lr.dword;
     mask = mr.dword;
@@ -228,7 +240,7 @@ static bool IsBulletBlocking(uint32_t layer, uint32_t mask) {
 }
 
 bool CastFirstBlocking(const float from[3], const float to[3], BlockingHit& out,
-                       reframework::API::ManagedObject* filter) {
+                       reframework::API::ManagedObject* filter, bool nameContact) {
     if (!g_cast.ready) return false;
 
     auto query = g_cast.queryType->create_instance();
@@ -238,8 +250,8 @@ bool CastFirstBlocking(const float from[3], const float to[3], BlockingHit& out,
     alignas(16) float from4[4] = { from[0], from[1], from[2], 0.f };
     alignas(16) float to4[4] = { to[0], to[1], to[2], 0.f };
 
-    std::vector<void*> rayArgs = { (void*)&from4[0], (void*)&to4[0] };
-    auto setRet = g_cast.setRay->invoke(query, rayArgs);
+    void* rayArgs[2] = { (void*)&from4[0], (void*)&to4[0] };
+    auto setRet = g_cast.setRay->invoke(query, std::span<void*>(rayArgs, 2));
     if (setRet.exception_thrown) return false;
 
     if (g_cast.enableAllHits) g_cast.enableAllHits->invoke(query, ref::EmptyArgs());
@@ -250,9 +262,10 @@ bool CastFirstBlocking(const float from[3], const float to[3], BlockingHit& out,
         if (filterRet.exception_thrown) return false;
     }
 
-    std::vector<void*> castArgs = { (void*)query };
+    void* castArgs[1] = { (void*)query };
     auto castRet = g_cast.castRay->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(g_cast.physicsSystem), castArgs);
+        reinterpret_cast<reframework::API::ManagedObject*>(g_cast.physicsSystem),
+        std::span<void*>(castArgs, 1));
     if (castRet.exception_thrown || !castRet.ptr) return false;
 
     auto result = reinterpret_cast<reframework::API::ManagedObject*>(castRet.ptr);
@@ -267,17 +280,16 @@ bool CastFirstBlocking(const float from[3], const float to[3], BlockingHit& out,
     // the ray reaches.
     const uint32_t contacts = countRet.dword < 32 ? countRet.dword : 32;
     for (uint32_t i = 0; i < contacts; i++) {
-        std::vector<void*> a = { (void*)(uintptr_t)i };
-        auto pr = g_cast.getContactPoint->invoke(result, a);
-        if (pr.exception_thrown) continue;
-        // Filter before naming: layer and mask are two reflection hops and reject
-        // most contacts, where resolving the GameObject name costs three more.
+        // Filter before reading the point: most contacts are rejected here.
         if (!filter) {
             uint32_t layer = 0, mask = 0;
             if (!ContactFilter(result, i, layer, mask)) continue;
             if (!IsBulletBlocking(layer, mask)) continue;
         }
-        ContactName(result, i, out.name, sizeof(out.name));
+        void* pointArgs[1] = { (void*)(uintptr_t)i };
+        auto pr = g_cast.getContactPoint->invoke(result, std::span<void*>(pointArgs, 1));
+        if (pr.exception_thrown) continue;
+        if (nameContact) ContactName(result, i, out.name, sizeof(out.name));
         // via.physics.ContactPoint: Position at +0x00, Normal at +0x10.
         const float* point = reinterpret_cast<const float*>(&pr.bytes[0]);
         for (int k = 0; k < 3; k++) {
@@ -300,24 +312,27 @@ bool TryGetAimDistance(const float origin[3], const float forward[3], float& out
         origin[1] + forward[1] * kTraceRange,
         origin[2] + forward[2] * kTraceRange };
 
-    BlockingHit contact;
-    if (!CastFirstBlocking(from, to, contact, nullptr) || !contact.blocked) return false;
-    const float hit = ContactAxialDistance(contact.position, origin, forward);
-    if (!(hit > 0.1f) || !(hit < kTraceRange * 1.5f)) return false;
-
     // No smoothing. The reticle is glued to a surface, so when the aim crosses
     // an edge the impact point genuinely jumps and the reticle is supposed to
     // jump with it. The 0.25-per-update lerp this replaced ran at 15Hz, a
     // quarter-second time constant, and spent that quarter second placing the
     // reticle for a depth the player was no longer aiming at.
+    //
+    // What the ray stopped on is named on a sample of casts. A distance of a
+    // metre or two is either the wall being aimed at or the player's own body,
+    // and the parallax is lean/distance, so mistaking one for the other scales
+    // the whole correction wrong.
     static int s_frame = 0;
     static int s_left = 20;
-    if (s_left > 0 && (s_frame++ % 20) == 0) {
+    const bool logThisCast = s_left > 0 && (s_frame++ % 20) == 0;
+
+    BlockingHit contact;
+    if (!CastFirstBlocking(from, to, contact, nullptr, logThisCast) || !contact.blocked) return false;
+    const float hit = ContactAxialDistance(contact.position, origin, forward);
+    if (!(hit > 0.1f) || !(hit < kTraceRange * 1.5f)) return false;
+
+    if (logThisCast) {
         s_left--;
-        // What the ray actually stopped on. A distance of a metre or two is
-        // either the wall being aimed at or the player's own body, and the
-        // parallax is lean/distance, so mistaking one for the other scales the
-        // whole correction wrong.
         ref::LogInfo("Aim trace: hit=%.2fm points=%u on \"%s\"",
             hit, contact.contacts, contact.name);
     }

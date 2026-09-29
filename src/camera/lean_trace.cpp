@@ -38,7 +38,7 @@ LeanObstruction Query(void*, const Vec3& start, const Vec3& direction, float max
     reframework::API::ManagedObject* filter = PlayerCollisionFilter();
     if (!filter) return result;
     BlockingHit hit;
-    if (!CastFirstBlocking(from, to, hit, filter)) return result;
+    if (!CastFirstBlocking(from, to, hit, filter, false)) return result;
     result.queried = true;
     if (!hit.blocked) return result;
 

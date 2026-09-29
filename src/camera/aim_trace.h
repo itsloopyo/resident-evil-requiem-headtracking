@@ -24,8 +24,9 @@ struct BlockingHit {
 // layer a bullet stops on; with a via.physics.FilterInfo, the engine applies it
 // to the cast and the nearest contact blocks. False when the cast could not run
 // at all; true with out.blocked false when it ran and nothing blocking lies
-// between the two points.
+// between the two points. out.name is filled only with nameContact, which costs
+// three more engine calls.
 bool CastFirstBlocking(const float from[3], const float to[3], BlockingHit& out,
-                       reframework::API::ManagedObject* filter);
+                       reframework::API::ManagedObject* filter, bool nameContact);
 
 } // namespace RE9HT
