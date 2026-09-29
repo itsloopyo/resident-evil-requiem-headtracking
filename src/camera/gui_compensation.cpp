@@ -115,16 +115,22 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
     const auto& gui = ref::GetGuiMethods();
     if (!guiMo || !gui.ready) return;
 
+    // The layout node sits natively at the canvas centre (LogGuiIdentity), and
+    // nothing says the game puts it back there after a write. So on the first
+    // frame without compensation (tracking off, a menu, a cutscene) it goes back
+    // to the centre, once, rather than keeping the last head-tracked offset.
+    static bool s_moved = false;
     const auto& crosshair = GetCrosshairProjection();
-    if (!crosshair.valid || !ref::PluginMod::Instance().IsEnabled() || !IsInGameplay()) return;
+    const bool active = crosshair.valid && ref::PluginMod::Instance().IsEnabled() && IsInGameplay();
+    if (!active && !s_moved) return;
 
     float canvasW = 0.f, canvasH = 0.f;
     if (!ref::GetElementCanvasSize(guiMo, canvasW, canvasH)) return;
     const float centreX = canvasW * 0.5f;
     const float centreY = canvasH * 0.5f;
     // NDC runs -1..+1 with y up; the canvas runs 0..height with y down.
-    const float deltaX =  crosshair.ndcX * canvasW * 0.5f;
-    const float deltaY = -crosshair.ndcY * canvasH * 0.5f;
+    const float deltaX = active ?  crosshair.ndcX * canvasW * 0.5f : 0.f;
+    const float deltaY = active ? -crosshair.ndcY * canvasH * 0.5f : 0.f;
 
     uint32_t count = 0;
     auto arr = ref::FindPlayObjects(guiMo, count);
@@ -133,22 +139,25 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
     auto layoutElem = ref::ArrayGetValue(arr, (int)kLayoutChildIdx);
     if (!layoutElem) return;
 
+    // Capped: the 120-frame interval alone streams for the whole
+    // session, which buries the startup chain a user is asked to send.
+    static int s_diagFrame = 0;
+    static int s_diagLeft = 5;
+    const bool logThisFrame = active && s_diagLeft > 0 && (s_diagFrame++ % 120) == 0;
+
     // Where the reticle sat before this write. The absolute write below assumes
     // the game parks its reticle at the canvas centre and leaves it there, so
     // that centre plus our offset is the whole story. If the game moves it
     // itself - for weapon sway, recoil, or a sight whose convergence depends on
     // range - then overwriting it discards that and leaves an error the mod
-    // cannot see. One read says which.
+    // cannot see. One read on a logged frame says which.
     float beforeX = 0.f, beforeY = 0.f;
-    ref::GetTransformPosition(layoutElem, beforeX, beforeY);
+    if (logThisFrame) ref::GetTransformPosition(layoutElem, beforeX, beforeY);
 
     ref::SetTransformPosition(layoutElem, centreX + deltaX, centreY + deltaY);
+    s_moved = active;
 
-    // Capped: the 120-frame interval alone streams for the whole
-    // session, which buries the startup chain a user is asked to send.
-    static int s_diagFrame = 0;
-    static int s_diagLeft = 5;
-    if (s_diagLeft > 0 && (s_diagFrame++ % 120) == 0) {
+    if (logThisFrame) {
         s_diagLeft--;
         ref::LogInfo("CROSSHAIR \"%s\": canvas=(%.0fx%.0f) centre=(%.1f,%.1f) "
             "ndc=(%.4f,%.4f) delta=(%.1f,%.1f) before=(%.1f,%.1f) wrote=(%.1f,%.1f)",
@@ -159,6 +168,22 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo, const c
 }
 
 // --- Marker compensation ---
+
+// "main" sits at the origin unrotated in the stock game, and nothing says the
+// game puts it back there after a write. So on the first frame without
+// compensation it goes back, once, rather than keeping the last head-tracked
+// offset and roll on every marker.
+static void ResetMarkerContainer(reframework::API::ManagedObject* guiMo) {
+    const auto& gui = ref::GetGuiMethods();
+    uint32_t count = 0;
+    auto arr = ref::FindPlayObjects(guiMo, count);
+    if (!arr || count < 2) return;
+    auto child1 = ref::ArrayGetValue(arr, 1);
+    if (!child1) return;
+    ref::SetTransformPosition(child1, 0.f, 0.f);
+    float rot[3] = { 0.f, 0.f, 0.f };
+    ref::InvokeMethodWithArg(gui.setRotation, child1, (void*)&rot[0]);
+}
 
 // The GUI writes each marker's projected screen position into that marker's own
 // node ("type0", flat PlayObject index in the 800s), and every ancestor up to
@@ -198,11 +223,18 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     const auto& gui = ref::GetGuiMethods();
     if (!guiMo || !gui.ready || !gui.setRotation || !gui.viewGetScreenSize) return;
 
+    static bool s_moved = false;
     const auto& crosshair = GetCrosshairProjection();
-    if (!crosshair.valid || !ref::PluginMod::Instance().IsEnabled() || !IsInGameplay()) return;
-
-    const float fovDeg = crosshair.fovDegrees;
-    if (fovDeg < 10.f) return;
+    const auto& projection = ref::GetFrameProjection();
+    const bool active = crosshair.valid && ref::PluginMod::Instance().IsEnabled() && IsInGameplay()
+        && crosshair.fovDegrees >= 10.f && projection.markerValid;
+    if (!active) {
+        if (s_moved) {
+            ResetMarkerContainer(guiMo);
+            s_moved = false;
+        }
+        return;
+    }
 
     // Canvas centre read from this GUI's own View. The rotation pivots on it, so
     // unlike the translation-only compensation that preceded this, a wrong
@@ -215,8 +247,6 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     float focalX = 0.f, focalY = 0.f;
     CanvasFocalLengths(canvasW, canvasH, focalX, focalY);
 
-    const auto& projection = ref::GetFrameProjection();
-    if (!projection.markerValid) return;
     const float offsetX = AimCanvasOffsetX(projection.markerTanRight, focalX);
     const float offsetY = AimCanvasOffsetY(projection.markerTanUp, focalY);
 
@@ -245,6 +275,7 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
 
     float rot[3] = { 0.f, 0.f, rollDeg };
     ref::InvokeMethodWithArg(gui.setRotation, child1, (void*)&rot[0]);
+    s_moved = true;
 
     // Capped: the 120-frame interval alone streams for the whole session,
     // which buries the startup chain a user is asked to send.
