@@ -211,7 +211,7 @@ static void RestoreLight() {
 
 void ApplyFlashlightTracking() {
     const ref::PluginConfig& config = ref::PluginMod::Instance().GetConfig();
-    if (!config.flashlightTracking || g_access.failed) return;
+    if (config.flashlightMultiplier == 0.f || g_access.failed) return;
 
     float yaw = 0.f, pitch = 0.f, roll = 0.f;
     if (!ref::PluginMod::Instance().GetProcessedRotation(yaw, pitch, roll)) return;

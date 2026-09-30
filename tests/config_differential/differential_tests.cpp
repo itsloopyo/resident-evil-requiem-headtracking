@@ -241,7 +241,7 @@ uint32_t Bits(float f) {
 // ---------------------------------------------------------------------------
 
 // Everything the startup code takes from the config, but pose shaping: Mod::Initialize at v0.4.0
-// and PluginMod::Initialize now, the flashlight hook's two settings, and the hotkeys.
+// and PluginMod::Initialize now, the flashlight hook's effective multiplier, and the hotkeys.
 struct Startup {
     int port = 0;
     bool enabled = false;
@@ -254,7 +254,6 @@ struct Startup {
     uint32_t limit_y_down = 0;
     uint32_t limit_z = 0;
     uint32_t limit_z_back = 0;
-    bool light_follows_head = false;
     uint32_t light_multiplier = 0;
     std::vector<Registration> hotkeys;
 };
@@ -276,8 +275,7 @@ Startup FromOracle(const oracle_api::Config& c) {
     s.limit_y_down = Bits(kPublishedLimitYDown);
     s.limit_z = Bits(c.positionLimitZ);
     s.limit_z_back = Bits(c.positionLimitZBack);
-    s.light_follows_head = c.flashlightTracking;
-    s.light_multiplier = Bits(c.flashlightMultiplier);
+    s.light_multiplier = Bits(c.flashlightTracking ? c.flashlightMultiplier : 0.f);
     s.hotkeys = CodeHotkeys(c.toggleKey, c.positionToggleKey, c.yawModeKey);
     return s;
 }
@@ -297,7 +295,6 @@ Startup FromImport(const Config& c) {
     s.limit_y_down = Bits(c.positionLimitY);
     s.limit_z = Bits(c.positionLimitZ);
     s.limit_z_back = Bits(c.positionLimitZBack);
-    s.light_follows_head = c.flashlightTracking;
     s.light_multiplier = Bits(c.flashlightMultiplier);
     s.hotkeys = CodeHotkeys(c.toggleKey, c.positionToggleKey, c.yawModeKey);
     return s;
@@ -325,7 +322,6 @@ std::vector<std::string> StartupDifferences(const Startup& a, const Startup& b) 
     SAME(limit_y_down);
     SAME(limit_z);
     SAME(limit_z_back);
-    SAME(light_follows_head);
     SAME(light_multiplier);
 #undef SAME
     if (a.hotkeys != b.hotkeys) out.push_back("hotkeys " + Describe(a.hotkeys) + " against " + Describe(b.hotkeys));
@@ -453,7 +449,9 @@ void CompareOracleWithImport(const std::string& name, const std::string& ansiPat
 
     std::set<std::string> seen;
     for (const FloatField& f : kFloatFields) {
-        const float ov = o.*f.oracle;
+        const float ov = f.oracle == &oracle_api::Config::flashlightMultiplier && !o.flashlightTracking
+                             ? 0.f
+                             : o.*f.oracle;
         const float rv = r.*f.read;
         if (Bits(ov) == Bits(rv)) continue;
         const std::string label = std::string("[") + f.section + "] " + f.key;
@@ -485,7 +483,6 @@ void CompareOracleWithImport(const std::string& name, const std::string& ansiPat
     };
     same(o.udpPort == r.udpPort, "udpPort");
     same(o.positionEnabled == r.positionEnabled, "positionEnabled");
-    same(o.flashlightTracking == r.flashlightTracking, "flashlightTracking");
     same(o.autoEnable == r.autoEnable, "autoEnable");
     same(o.worldSpaceYaw == r.worldSpaceYaw, "worldSpaceYaw");
 
@@ -658,8 +655,6 @@ const std::vector<FollowRow>& FollowRows() {
         {"CycleTrackingModeKey", "Hotkeys", "PositionToggleKey", "0x2D", Same(&Config::positionToggleKey),
          Same(&Config::cycleTrackingModeKeyBindings)},
         {"YawModeKey", "Hotkeys", "YawModeKey", "0x2E", Same(&Config::yawModeKey), Same(&Config::yawModeKeyBindings)},
-        {"LightFollowsHead", "Flashlight", "Enabled", "false", Same(&Config::flashlightTracking),
-         Same(&Config::flashlightTracking)},
         {"LightMultiplier", "Flashlight", "Multiplier", "2.5", Same(&Config::flashlightMultiplier),
          Same(&Config::flashlightMultiplier)},
     };
@@ -1009,7 +1004,6 @@ std::wstring OtherDefaultsIni(const std::wstring& root) {
         {"Hotkeys", "ToggleKey", "F9"},
         {"Hotkeys", "CycleTrackingModeKey", "F10"},
         {"Hotkeys", "YawModeKey", "F11"},
-        {"Light", "LightFollowsHead", "false"},
         {"Light", "LightMultiplier", "2.0"},
     });
     if (!edited.Succeeded()) throw std::logic_error("cannot edit the scratch Defaults.ini");
@@ -1049,7 +1043,10 @@ void TestFollowsDefaultsIni(const std::wstring& root, const std::string& shipped
     }
 
     const cfg::LegacyImport<Config> import = cameraunlock::reframework::PluginConfigLegacyImport(RE9HT::kConfigSchema);
-    for (const FollowRow& changed : FollowRows()) {
+    std::vector<FollowRow> changes = FollowRows();
+    changes.push_back({"LightMultiplier", "Flashlight", "Enabled", "false", Same(&Config::flashlightMultiplier),
+                       Same(&Config::flashlightMultiplier)});
+    for (const FollowRow& changed : changes) {
         const cameraunlock::IniEditResult edited = cameraunlock::EditIni(shipped, {{changed.section, changed.key, changed.alternate}});
         if (!edited.Succeeded()) throw std::logic_error(std::string("the shipped file has no ") + changed.key);
         const std::string name = std::string("[") + changed.section + "] " + changed.key + "=" + changed.alternate;
@@ -1077,7 +1074,7 @@ void TestFollowsDefaultsIni(const std::wstring& root, const std::string& shipped
                 continue;
             }
             for (const FollowRow& row : FollowRows()) {
-                const bool isChanged = &row == &changed;
+                const bool isChanged = std::strcmp(row.concept_name, changed.concept_name) == 0;
                 const Config& want = isChanged ? player : *start;
                 if (!row.row_same(m.loaded.config, want)) {
                     Fail(where, std::string(row.concept_name) +
@@ -1094,8 +1091,8 @@ void TestFollowsDefaultsIni(const std::wstring& root, const std::string& shipped
         RemoveFolders(f);
     }
 
-    std::printf("follows Defaults.ini: %zu untouched files, and %zu rows each changed alone, against two Defaults.ini files\n",
-                published.size() - 1, FollowRows().size());
+    std::printf("follows Defaults.ini: %zu untouched files, and %zu legacy settings each changed alone, against two Defaults.ini files\n",
+                published.size() - 1, changes.size());
     const std::wstring global = root + L"\\global-other";
     EmptyFolder(global);
     RemoveDirectoryW(global.c_str());
