@@ -13,7 +13,7 @@ set "MOD_DISPLAY_NAME=RE9 Head Tracking"
 :: would overwrite the player's settings on every install.
 set "MOD_DLLS=RE9HeadTracking.dll"
 set "MOD_INTERNAL_NAME=RE9HeadTracking"
-set "MOD_VERSION=0.4.0"
+set "MOD_VERSION=0.5.0"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=REFramework"
 set "REFRAMEWORK_VENDOR_ZIP_NAME=REFramework.zip"
